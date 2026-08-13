@@ -19,4 +19,4 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
-    usgs_base_url: str = "https://earthquake.usgs.gov/fdsnws/event/1/query"
+    usgs_base_url: str = "https://earthquake.usgs.gov/fdsnws/event/1/"
