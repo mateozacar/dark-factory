@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class EarthquakeResponse(BaseModel):
@@ -61,6 +61,24 @@ class GeoJSONFeature(BaseModel):
 
 class GeoJSONFeatureCollection(BaseModel):
     """GeoJSON FeatureCollection wrapping a list of earthquake features."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [-122.1, 37.5, 10.0],
+                        },
+                        "properties": {"id": "us7000abc1", "mag": 5.2},
+                    }
+                ],
+            }
+        }
+    )
 
     type: str = "FeatureCollection"
     features: list[GeoJSONFeature]
