@@ -1,23 +1,43 @@
 """
 Infrastructure — mapper: USGS GeoJSON → Earthquake domain entity.
-
-Stub: intentionally unimplemented until the infrastructure story lands.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from dark_factory.domain.earthquake.entities import Earthquake
+from dark_factory.domain.earthquake.entities import Earthquake
 
 
 class USGSMapper:
-    """Translates a USGS GeoJSON feature dict to an Earthquake domain entity.
-
-    Not implemented in this story — raises NotImplementedError on use.
-    """
+    """Translates a USGS GeoJSON feature dict to an Earthquake domain entity."""
 
     @staticmethod
     def feature_to_earthquake(feature: dict[str, object]) -> Earthquake:
-        raise NotImplementedError("stub — implement in the infrastructure story")
+        """Map a USGS GeoJSON feature dict to an Earthquake domain entity."""
+        earthquake_id = str(feature["id"])
+        properties = feature["properties"]
+        if not isinstance(properties, dict):
+            raise TypeError(
+                f"Expected dict for 'properties', got {type(properties).__name__}"
+            )
+        mag = properties["mag"]
+        magnitude = float(mag)
+        geometry = feature["geometry"]
+        if not isinstance(geometry, dict):
+            raise TypeError(
+                f"Expected dict for 'geometry', got {type(geometry).__name__}"
+            )
+        coordinates = geometry["coordinates"]
+        if not isinstance(coordinates, list):
+            raise TypeError(
+                f"Expected list for 'coordinates', got {type(coordinates).__name__}"
+            )
+        longitude = float(coordinates[0])
+        latitude = float(coordinates[1])
+        depth = float(coordinates[2])
+        return Earthquake(
+            id=earthquake_id,
+            magnitude=magnitude,
+            depth=depth,
+            latitude=latitude,
+            longitude=longitude,
+        )

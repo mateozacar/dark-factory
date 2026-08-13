@@ -7,6 +7,8 @@ the handler boundary and must NOT leak into the domain layer.
 
 from __future__ import annotations
 
+from datetime import date
+
 from pydantic import BaseModel
 
 
@@ -30,10 +32,35 @@ class EarthquakeListResponse(BaseModel):
 class EarthquakeFilterParams(BaseModel):
     """Pydantic model for query-parameter based earthquake filtering."""
 
-    min_magnitude: float | None = None
-    max_magnitude: float | None = None
-    min_depth: float | None = None
-    max_depth: float | None = None
-    start_time: str | None = None
-    end_time: str | None = None
-    limit: int | None = None
+    starttime: date
+    endtime: date
+    minmagnitude: float
+
+
+class GeoJSONGeometry(BaseModel):
+    """GeoJSON Point geometry."""
+
+    type: str = "Point"
+    coordinates: list[float]
+
+
+class GeoJSONFeatureProperties(BaseModel):
+    """Properties embedded in a GeoJSON Feature."""
+
+    id: str
+    mag: float
+
+
+class GeoJSONFeature(BaseModel):
+    """GeoJSON Feature wrapping a single earthquake."""
+
+    type: str = "Feature"
+    geometry: GeoJSONGeometry
+    properties: GeoJSONFeatureProperties
+
+
+class GeoJSONFeatureCollection(BaseModel):
+    """GeoJSON FeatureCollection wrapping a list of earthquake features."""
+
+    type: str = "FeatureCollection"
+    features: list[GeoJSONFeature]

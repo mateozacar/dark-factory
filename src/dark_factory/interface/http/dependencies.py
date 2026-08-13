@@ -1,14 +1,14 @@
 """
 Interface — FastAPI dependency injection wiring.
-
-Stub: returns a placeholder until the infrastructure story wires the real adapter.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from fastapi import Request
+
+from dark_factory.infrastructure.usgs.adapter import USGSAdapter
 
 
-def get_earthquake_repository() -> Any:
-    """DI stub — returns None until USGSAdapter is wired via the lifespan client."""
-    return None
+def get_earthquake_repository(request: Request) -> USGSAdapter:
+    """Return a USGSAdapter wired with the lifespan-managed httpx.AsyncClient."""
+    return USGSAdapter(client=request.app.state.http_client)
