@@ -30,8 +30,20 @@ After implementation and review are complete:
 2. Create a commit using Conventional Commits format referencing the issue number:
    "feat|fix|chore: <short description> (#<issue-num>)"
 3. Push the branch: git push -u origin {branch-name}
-4. Show the user the pushed branch name and the GitHub compare/PR URL, and remind them
-   to open a Pull Request targeting main.
+4. Create a Pull Request targeting main using the GitHub CLI:
+   gh pr create --base main --title "<same title as the commit>" --body "$(cat <<'EOF'
+## Summary
+<1-3 bullet points summarising what was implemented>
+
+## Test plan
+- [ ] All tests pass (`uv run pytest`)
+- [ ] Ruff and mypy pass (`uv run ruff check . && uv run mypy src/`)
+- [ ] Manually verified against acceptance criteria in the spec
+
+Closes #<issue-num>
+EOF
+)"
+5. Report the PR URL to the user.
 """
 
 # TDD: split implementation into two phases separated by a required human gate.
