@@ -25,4 +25,22 @@ After saving the spec artifacts:
 4. Report the created issue number and URL to the user.
 5. Remind the user: to start development on this story, create the branch following the convention
    feature/DARK-{issue-number}-{short-slug}.
+6. Report session cost:
+   - Model used: state the exact model name you are running on.
+   - Token estimate: count the characters in everything loaded into context (files, conversation, outputs)
+     and divide by 4 for a rough token count. Split into input tokens (context loaded + user messages)
+     and output tokens (everything you generated).
+   - Cost estimate: apply the pricing below and show the formula used.
+   - Note that this is an approximation; exact usage is visible in the API dashboard.
+
+   Pricing reference (per million tokens — verify at the provider's pricing page if in doubt):
+   | Model                  | Input     | Output    |
+   |------------------------|-----------|-----------|
+   | Claude Opus 4          | $15.00    | $75.00    |
+   | Claude Sonnet 4.x      | $3.00     | $15.00    |
+   | Claude Haiku 3.5       | $0.80     | $4.00     |
+   | GPT-4o                 | $2.50     | $10.00    |
+   | GPT-4o-mini            | $0.15     | $0.60     |
+   | o3                     | $10.00    | $40.00    |
+   | o4-mini                | $1.10     | $4.40     |
 """
