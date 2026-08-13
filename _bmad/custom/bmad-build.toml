@@ -1,5 +1,5 @@
 # Dark-Factory team override for bmad-build.
-# Enforces GitHub Flow branch creation at start and push + PR reminder at end.
+# Enforces GitHub Flow branch creation at start, TDD with human gate, and push + PR reminder at end.
 
 [workflow]
 
@@ -7,6 +7,7 @@ persistent_facts = [
   "The project GitHub repository is mateozacar/dark-factory.",
   "Branch convention (GitHub Flow): feature/DARK-{num}-{slug} for new features, bugfix/DARK-{num}-{slug} for bug fixes, hotfix/DARK-{num}-{slug} for urgent fixes, chore/DARK-{num}-{slug} for maintenance. All branches are created from main.",
   "file:{project-root}/_bmad-output/planning-artifacts/*.md",
+  "TDD mandate: Tests are always written first and the human approves the test contract before any implementation code is written. The two-phase implementation_handoff enforces this — never collapse the phases or skip the human gate.",
 ]
 
 activation_steps_append = [
@@ -31,4 +32,50 @@ After implementation and review are complete:
 3. Push the branch: git push -u origin {branch-name}
 4. Show the user the pushed branch name and the GitHub compare/PR URL, and remind them
    to open a Pull Request targeting main.
+"""
+
+# TDD: split implementation into two phases separated by a required human gate.
+# Rationale: an agent can write tests and implementation simultaneously, so the only
+# thing that preserves TDD's value is a human checkpoint between the behavioral
+# contract (tests) and the code that satisfies it.
+implementation_handoff = """
+## TDD Implementation — Two Phases with Required Human Gate
+
+### PHASE 1 — Write Tests First (no implementation code)
+
+Launch a subagent with no prior conversation context, with this prompt:
+
+> Read {spec_file} fully. Your SOLE task is writing tests — write NO implementation code whatsoever.
+>
+> For every acceptance criterion in the spec's "Tasks & Acceptance" section:
+> - Write test(s) expressing the expected behaviour using the project's existing test framework and conventions.
+> - Tests must be syntactically valid and runnable, but must FAIL because the implementation does not exist yet.
+> - Mirror the Given/When/Then structure of each AC in the test descriptions.
+> - If the spec contains an I/O & Edge-Case Matrix, every matrix row must have at least one covering test.
+>
+> When done, report:
+> 1. Every test file written (CWD-relative paths with line notation, e.g. src/foo.test.ts:12).
+> 2. The exact command to run the tests.
+> 3. The failing test output — run the tests and paste the result to confirm they are real and not vacuous.
+
+### HUMAN GATE — required, do not skip or merge with Phase 2
+
+Present the subagent's test report to the user:
+- List the test files and what behavioural contract each encodes.
+- Show the failing test output (proves tests are real).
+
+HALT and ask: `[A] Approve test contract — proceed to implementation` | `[E] Edit tests`
+
+- **E**: Collect the requested changes, apply them (or relaunch the test-writing subagent with the corrections), then return to this HUMAN GATE.
+- **A**: Proceed to Phase 2.
+
+### PHASE 2 — Implement to Green
+
+Launch a subagent with no prior conversation context, with this prompt:
+
+> Read {spec_file} fully — it is your sole source of truth. Load every file listed in its frontmatter `context:` before you start.
+>
+> The test suite is already written and the human has approved it. Your job is ONLY to write the implementation code that makes those tests pass — do NOT add, remove, or modify any test file.
+>
+> When done: run the full test suite and report what you changed, the complete test results (all must pass), and anything left incomplete or risky.
 """

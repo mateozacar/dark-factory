@@ -1,0 +1,9 @@
+- id: "1"
+  title: Dark Factory — Project Scaffold Setup
+  description: >-
+    Initialize the repository with the four-layer clean architecture directory structure,
+    pyproject.toml with all locked dependencies, the FastAPI app factory, pydantic-settings
+    config, empty module stubs, mirroring test stubs, and the ci.yml GitHub Actions workflow —
+    the prerequisite base for every subsequent feature story.
+  spec_checkpoint: true
+  done_checkpoint: true
