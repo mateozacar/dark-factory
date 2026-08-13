@@ -25,22 +25,35 @@ After saving the spec artifacts:
 4. Report the created issue number and URL to the user.
 5. Remind the user: to start development on this story, create the branch following the convention
    feature/DARK-{issue-number}-{short-slug}.
-6. Report session cost:
-   - Model used: state the exact model name you are running on.
-   - Token estimate: count the characters in everything loaded into context (files, conversation, outputs)
-     and divide by 4 for a rough token count. Split into input tokens (context loaded + user messages)
-     and output tokens (everything you generated).
-   - Cost estimate: apply the pricing below and show the formula used.
-   - Note that this is an approximation; exact usage is visible in the API dashboard.
+6. Calculate and persist session cost:
 
-   Pricing reference (per million tokens — verify at the provider's pricing page if in doubt):
-   | Model                  | Input     | Output    |
-   |------------------------|-----------|-----------|
-   | Claude Opus 4          | $15.00    | $75.00    |
-   | Claude Sonnet 4.x      | $3.00     | $15.00    |
-   | Claude Haiku 3.5       | $0.80     | $4.00     |
-   | GPT-4o                 | $2.50     | $10.00    |
-   | GPT-4o-mini            | $0.15     | $0.60     |
-   | o3                     | $10.00    | $40.00    |
-   | o4-mini                | $1.10     | $4.40     |
+   PRICING REFERENCE (per million tokens):
+   | Model              | Input   | Output  |
+   |--------------------|---------|---------|
+   | Claude Opus 4      | $15.00  | $75.00  |
+   | Claude Sonnet 4.x  | $3.00   | $15.00  |
+   | Claude Haiku 3.5   | $0.80   | $4.00   |
+   | GPT-4o             | $2.50   | $10.00  |
+   | GPT-4o-mini        | $0.15   | $0.60   |
+   | o3                 | $10.00  | $40.00  |
+   | o4-mini            | $1.10   | $4.40   |
+
+   a. Estimate tokens: total characters processed (context loaded + conversation + outputs) / 4.
+      Split into input (context + messages received) and output (everything generated).
+   b. Calculate cost using the table above for the model you are running on.
+   c. Append a `## Cost Log` section to the SPEC.md you just wrote (or update it if it already exists):
+      Format — one row per session run:
+      | Date (UTC) | Phase | Model | ~Input tkns | ~Output tkns | ~Cost USD |
+      |------------|-------|-------|------------|--------------|-----------|
+      | YYYY-MM-DD | spec  | <model> | <n> | <n> | $<n> |
+   d. Append a row to `{project-root}/_bmad-output/implementation-artifacts/cost-log.md`.
+      Create the file with a header if it does not exist:
+      # Cost Log
+      | Date (UTC) | Issue | Phase | Model | ~Input tkns | ~Output tkns | ~Cost USD |
+      |------------|-------|-------|-------|------------|--------------|-----------|
+      Then append:
+      | YYYY-MM-DD | #<issue-num> | spec | <model> | <n> | <n> | $<n> |
+   e. Use the GitHub MCP tool to add a comment to issue <issue-num>:
+      "**Session cost (spec):** model `<model>` — ~<n> input tokens, ~<n> output tokens — est. **$<n>**
+      _(approximation based on character count / 4; verify in API dashboard)_"
 """
