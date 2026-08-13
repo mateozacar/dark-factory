@@ -170,6 +170,12 @@ deferred:
 
 **Inline `health_check` route.** It is defined as a closure inside `create_app()`, not in the router file. Add `summary` and `description` as keyword args to `@app.get("/health", tags=["health"], summary="...", description="...")`.
 
+## Cost Log
+
+| Date (UTC) | Phase | Model | ~Input tkns | ~Output tkns | ~Cost USD |
+|------------|-------|-------|-------------|--------------|-----------|
+| 2026-08-13 | build-auto | claude-sonnet-4-6 | 220000 | 38000 | $1.23 |
+
 ## Verification
 
 **Commands:**
