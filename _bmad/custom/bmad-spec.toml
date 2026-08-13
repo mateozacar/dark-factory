@@ -1,0 +1,27 @@
+# Dark-Factory team override for bmad-spec.
+# Enforces the project spec template and auto-creates GitHub issues on completion.
+
+[workflow]
+
+spec_template = "_bmad/custom/bmad-spec-dark-factory-template.md"
+
+persistent_facts = [
+  "The project GitHub repository is mateozacar/dark-factory.",
+  "Branch convention (GitHub Flow): feature/DARK-{num}-{slug} for new features, bugfix/DARK-{num}-{slug} for bug fixes, hotfix/DARK-{num}-{slug} for urgent fixes, chore/DARK-{num}-{slug} for maintenance. All branches are created from main.",
+  "file:{project-root}/_bmad-output/planning-artifacts/*.md",
+]
+
+on_complete = """
+After saving the spec artifacts:
+1. Verify the spec is consistent with the Product Brief and Architecture documents loaded in context.
+   Flag any conflict or misalignment to the user before proceeding.
+2. Use the GitHub MCP tool to create a new issue in mateozacar/dark-factory:
+   - Title: the spec title.
+   - Body: include the Description, What/Why, Acceptance Criteria, Definition of Ready,
+     and Definition of Done sections from the spec. Add the local spec file path at the bottom.
+   - Labels: "user-story" and "spec-ready" (create them if they do not exist).
+3. If a GitHub Project board exists in mateozacar/dark-factory, add the created issue to it.
+4. Report the created issue number and URL to the user.
+5. Remind the user: to start development on this story, create the branch following the convention
+   feature/DARK-{issue-number}-{short-slug}.
+"""

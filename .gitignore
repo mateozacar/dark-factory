@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+vendor/
+.venv/
+__pycache__/
+*.pyc
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# BMad personal overrides (never commit)
+_bmad/custom/*.user.toml
+_bmad/render/
+
+# Logs
+*.log
+logs/

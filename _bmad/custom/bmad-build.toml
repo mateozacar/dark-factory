@@ -1,0 +1,34 @@
+# Dark-Factory team override for bmad-build.
+# Enforces GitHub Flow branch creation at start and push + PR reminder at end.
+
+[workflow]
+
+persistent_facts = [
+  "The project GitHub repository is mateozacar/dark-factory.",
+  "Branch convention (GitHub Flow): feature/DARK-{num}-{slug} for new features, bugfix/DARK-{num}-{slug} for bug fixes, hotfix/DARK-{num}-{slug} for urgent fixes, chore/DARK-{num}-{slug} for maintenance. All branches are created from main.",
+  "file:{project-root}/_bmad-output/planning-artifacts/*.md",
+]
+
+activation_steps_append = [
+  """
+Before clarifying the spec or starting implementation, ask the user two questions:
+  Q1. What is the GitHub issue number for this work? (enter the number, or 'new' if no issue exists yet)
+  Q2. What type of change is this? Options: feature | bugfix | hotfix | chore
+Using the answers, build the branch name following the convention: {type}/DARK-{num}-{short-slug}.
+Then run these git commands in sequence:
+  1. git checkout main
+  2. git pull origin main
+  3. git checkout -b {branch-name}
+Confirm the branch was created successfully and display the branch name before proceeding.
+""",
+]
+
+on_complete = """
+After implementation and review are complete:
+1. Stage the changed files by name (never use git add -A or git add .).
+2. Create a commit using Conventional Commits format referencing the issue number:
+   "feat|fix|chore: <short description> (#<issue-num>)"
+3. Push the branch: git push -u origin {branch-name}
+4. Show the user the pushed branch name and the GitHub compare/PR URL, and remind them
+   to open a Pull Request targeting main.
+"""
