@@ -26,7 +26,11 @@ Thumbs.db
 
 # BMad personal overrides (never commit)
 _bmad/custom/*.user.toml
+_bmad/config.user.toml
 _bmad/render/
+
+# Claude Code personal settings (never commit)
+.claude/settings.local.json
 
 # Logs
 *.log
