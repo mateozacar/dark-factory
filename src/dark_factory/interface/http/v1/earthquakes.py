@@ -24,7 +24,20 @@ from dark_factory.interface.http.v1.schemas import (
 router = APIRouter(prefix="/earthquakes", tags=["earthquakes"])
 
 
-@router.get("", response_model=GeoJSONFeatureCollection)
+@router.get(
+    "",
+    response_model=GeoJSONFeatureCollection,
+    summary="List earthquakes",
+    description=(
+        "Filter and retrieve earthquakes from the USGS Earthquake Hazards API."
+        " All three parameters are required."
+        " Responses are returned as a GeoJSON FeatureCollection."
+    ),
+    responses={
+        422: {"description": "Missing or invalid query parameters."},
+        502: {"description": "USGS upstream unavailable or returned an error."},
+    },
+)
 async def list_earthquakes(
     params: Annotated[EarthquakeFilterParams, Depends()],
     repo: Annotated[EarthquakeRepository, Depends(get_earthquake_repository)],
@@ -51,13 +64,27 @@ async def list_earthquakes(
     return GeoJSONFeatureCollection(type="FeatureCollection", features=features)
 
 
-@router.get("/recent")
+@router.get(
+    "/recent",
+    summary="Recent earthquakes (stub)",
+    description=(
+        "Shortcut for the last 24 hours with magnitude \u2265 2.5."
+        " **Currently a stub** \u2014 returns placeholder data."
+    ),
+)
 async def recent_earthquakes() -> dict[str, str]:
     """Return earthquakes from the last 24 h with magnitude >= 2.5. (stub)"""
     return {"status": "stub"}
 
 
-@router.get("/{earthquake_id}")
+@router.get(
+    "/{earthquake_id}",
+    summary="Get earthquake by ID (stub)",
+    description=(
+        "Retrieve a single earthquake event by its USGS event ID."
+        " **Currently a stub** \u2014 returns placeholder data."
+    ),
+)
 async def get_earthquake_by_id(earthquake_id: str) -> dict[str, str]:
     """Return a single earthquake by its USGS event ID. (stub)"""
     return {"status": "stub"}

@@ -31,18 +31,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application instance."""
+    openapi_tags = [
+        {
+            "name": "earthquakes",
+            "description": (
+                "Query real-time global earthquake data proxied"
+                " from the USGS Earthquake Hazards API."
+            ),
+        },
+        {
+            "name": "health",
+            "description": "Service health and upstream availability check.",
+        },
+    ]
+
     app = FastAPI(
         title="Dark Factory — Earthquake API",
         description="Stateless USGS earthquake proxy built with Clean Architecture.",
         version="0.1.0",
         lifespan=lifespan,
+        openapi_tags=openapi_tags,
     )
 
     # /api/v1 versioned router
     app.include_router(earthquakes_router, prefix="/api/v1")
 
     # /health — lives outside the versioned prefix
-    @app.get("/health", tags=["health"])
+    @app.get(
+        "/health",
+        tags=["health"],
+        summary="Service health check",
+        description=(
+            "Confirms the service is running."
+            " Returns 200 when the application is healthy."
+        ),
+    )
     async def health_check() -> dict[str, str]:
         return {"status": "ok"}
 
