@@ -139,7 +139,7 @@ class TestSettingsConfig:
             from dark_factory.config import Settings
 
             settings = Settings()
-            assert settings.usgs_base_url == "https://earthquake.usgs.gov/fdsnws/event/1/query"
+            assert settings.usgs_base_url == "https://earthquake.usgs.gov/fdsnws/event/1/"
         finally:
             if env_backup is not None:
                 os.environ["USGS_BASE_URL"] = env_backup

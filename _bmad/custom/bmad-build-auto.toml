@@ -1,0 +1,166 @@
+# Dark-Factory team override for bmad-build-auto.
+# Loop completamente desatendido: spec → branch → tests → impl → review → commit → PR.
+# Ningun human gate. La unica intervencion humana es escribir el intent inicial.
+# GitHub operations use the GitHub MCP tool, not the gh CLI.
+
+[workflow]
+
+persistent_facts = [
+  "The project GitHub repository is mateozacar/dark-factory (owner: mateozacar, repo: dark-factory).",
+  "Branch convention (GitHub Flow): feature/DARK-{num}-{slug} for new features, bugfix/DARK-{num}-{slug} for bug fixes, hotfix/DARK-{num}-{slug} for urgent fixes, chore/DARK-{num}-{slug} for maintenance. All branches are created from main.",
+  "file:{project-root}/AGENTS.md",
+  "file:{project-root}/_bmad-output/planning-artifacts/**/*.md",
+  "file:{project-root}/_bmad-output/specs/**/*.md",
+  "TDD mandate: Tests MUST be written first and MUST fail before implementation begins. The automated gate is the only gate — no human approval.",
+  "Quality gate: ALL of the following must pass before the PR is created: uv run pytest tests/ -q (zero failures), uv run ruff check . (zero violations), uv run mypy src/ (zero errors).",
+]
+
+activation_steps_append = [
+  """
+Before starting implementation, extract the issue number and change type from the spec or the provided intent:
+- Look for a GitHub issue number in the spec frontmatter, title, or the user's intent message.
+  If found, use it as {num}.
+  If not found, use the GitHub MCP tool to create a new issue in mateozacar/dark-factory:
+    title: <spec title>
+    body: <spec description and acceptance criteria>
+    labels: ["spec-ready"]
+  Use the returned issue number as {num}.
+- Determine {type}: feature | bugfix | hotfix | chore — infer from the spec content if not explicit.
+- Build the branch name: {type}/DARK-{num}-{short-slug} where {short-slug} is a 2-4 word kebab-case summary.
+- Run in sequence:
+  1. git checkout main
+  2. git pull origin main
+  3. git checkout -b {branch-name}
+- Confirm the branch was created. If it already exists, check it out — do not abort.
+- Update the GitHub issue using the GitHub MCP tool:
+  1. Ensure these labels exist in mateozacar/dark-factory (create if missing):
+       "in-progress" color #0075ca
+       "blocked"     color #d93f0b
+  2. Add the label "in-progress" to issue {num}.
+  3. Add a comment to issue {num}:
+     "Branch created: `{branch-name}` — automated implementation loop starting."
+""",
+]
+
+on_complete = """
+After all review layers pass:
+1. Run the full quality gate one final time:
+   uv run pytest tests/ -q && uv run ruff check . && uv run mypy src/
+   If anything fails, fix it before continuing — do not create a PR with a failing gate.
+2. Stage only the changed files by name (never use git add -A or git add .).
+3. Create a commit using Conventional Commits format:
+   "feat|fix|chore: <short description> (#<issue-num>)"
+4. Push the branch:
+   git push -u origin {branch-name}
+5. Use the GitHub MCP tool to create a Pull Request in mateozacar/dark-factory:
+   - base: "main"
+   - head: "{branch-name}"
+   - title: same as the commit title
+   - body:
+     ## Summary
+     <1-3 bullet points describing what was implemented>
+
+     ## Automated verification
+     - All tests passed (`uv run pytest tests/ -q`)
+     - Ruff and mypy clean (`uv run ruff check . && uv run mypy src/`)
+     - Verified against spec acceptance criteria
+
+     Closes #<issue-num>
+6. Use the GitHub MCP tool to add a comment to issue <issue-num>:
+   "PR created: <pr-url> — CI running, auto-merge enabled. Issue will close automatically when PR merges."
+7. Enable auto-merge — merge only triggers after CI passes (requires branch protection with required status checks):
+   gh pr merge --auto --squash
+   If auto-merge is unavailable, skip and note it in the report.
+8. Report the PR URL and auto-merge status.
+9. Calculate and persist session cost:
+
+   PRICING REFERENCE (per million tokens):
+   | Model              | Input   | Output  |
+   |--------------------|---------|---------|
+   | Claude Opus 4      | $15.00  | $75.00  |
+   | Claude Sonnet 4.x  | $3.00   | $15.00  |
+   | Claude Haiku 3.5   | $0.80   | $4.00   |
+   | GPT-4o             | $2.50   | $10.00  |
+   | GPT-4o-mini        | $0.15   | $0.60   |
+   | o3                 | $10.00  | $40.00  |
+   | o4-mini            | $1.10   | $4.40   |
+
+   a. Estimate tokens: total characters processed across the full loop (spec + all source files loaded +
+      all subagent prompts and outputs + conversation) / 4.
+      Split into input (all context + prompts sent) and output (all generated content across subagents).
+   b. Calculate cost using the table above for the model you are running on.
+   c. Append a row to the `## Cost Log` section at the bottom of {spec_file}.
+      If the section does not exist, add it:
+      ## Cost Log
+      | Date (UTC) | Phase | Model | ~Input tkns | ~Output tkns | ~Cost USD |
+      |------------|-------|-------|------------|--------------|-----------|
+      Then append:
+      | YYYY-MM-DD | build-auto | <model> | <n> | <n> | $<n> |
+   d. Append a row to `{project-root}/_bmad-output/implementation-artifacts/cost-log.md`.
+      Create the file with a header if it does not exist:
+      # Cost Log
+      | Date (UTC) | Issue | Phase | Model | ~Input tkns | ~Output tkns | ~Cost USD |
+      |------------|-------|-------|-------|------------|--------------|-----------|
+      Then append:
+      | YYYY-MM-DD | #<issue-num> | build-auto | <model> | <n> | <n> | $<n> |
+   e. Use the GitHub MCP tool to add a comment to issue <issue-num>:
+      "**Session cost (build-auto):** model `<model>` — ~<n> input tokens, ~<n> output tokens — est. **$<n>**
+      _(approximation based on character count / 4; verify in API dashboard)_"
+"""
+
+# Two-phase TDD with automated gate — no human in the loop.
+implementation_handoff = """
+## TDD — Two Phases, Automated Gate
+
+### PHASE 1 — Tests First
+
+Launch a subagent with no prior conversation context:
+
+> Read {spec_file} fully. Your SOLE task is writing tests — write NO implementation code whatsoever.
+>
+> For every acceptance criterion:
+> - Write test(s) using the project's existing test framework (pytest + anyio, see tests/ directory).
+> - Tests must be syntactically valid but FAIL because the implementation does not exist yet.
+> - Mirror AC structure in test descriptions.
+> - Cover every row in any I/O or edge-case matrix.
+>
+> When done:
+> 1. List every test file written (repo-relative path with first line number).
+> 2. Run `uv run pytest tests/ -q` and paste the complete output.
+> 3. Confirm: output must contain FAILED/FAIL lines, not syntax or import errors.
+
+### AUTOMATED GATE
+
+After receiving the Phase 1 report, verify autonomously:
+
+1. Does the test output contain FAILED or FAIL? → gate PASSES:
+   - Use the GitHub MCP tool to add a comment to issue {num} in mateozacar/dark-factory:
+     "Tests written and gate passed — starting implementation."
+   - Proceed to Phase 2 immediately.
+2. Does the output contain ERROR / SyntaxError / ImportError before any test executed? → gate FAILS.
+3. On gate FAIL: relaunch Phase 1 subagent with added instruction:
+   "Previous run had errors before tests reached assertions. Fix syntax/import issues.
+    Tests must reach the assertion stage and fail there — not before."
+   Retry the gate. Max 2 retries. After 2 failures:
+   - Use the GitHub MCP tool to add a comment to issue {num}:
+     "BLOCKED: test gate failed after 2 retries. Manual intervention required."
+   - Use the GitHub MCP tool to add the label "blocked" and remove "in-progress" from issue {num}.
+   - HALT.
+
+### PHASE 2 — Implement to Green
+
+Launch a subagent with no prior conversation context:
+
+> Read {spec_file} fully — it is your sole source of truth. Load every file in its frontmatter `context:`.
+>
+> Tests are already written and the gate passed. Write ONLY implementation code.
+> Do NOT modify, add, or delete any test file.
+>
+> When done:
+> 1. Run `uv run pytest tests/ -q` — all tests must pass.
+> 2. Run `uv run ruff check . && uv run mypy src/` — must be clean.
+> 3. Report: changed files, complete test output, complete lint output, any risks.
+
+After receiving the Phase 2 report, use the GitHub MCP tool to add a comment to issue {num}:
+  "Implementation complete. All tests passing, lint clean — proceeding to review."
+"""

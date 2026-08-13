@@ -22,7 +22,7 @@ class USGSClient:
     ) -> dict[str, object]:
         """Fetch earthquake data from the USGS FDSNWS API."""
         response = await self._client.get(
-            "",
+            "query",
             params={
                 "format": "geojson",
                 "starttime": str(starttime),
@@ -31,6 +31,7 @@ class USGSClient:
                 "orderby": "time",
             },
         )
+        response.raise_for_status()
         result: dict[str, object] = response.json()
         return result
 

@@ -1,13 +1,15 @@
 # Dark-Factory team override for bmad-build.
-# Enforces GitHub Flow branch creation at start, TDD with human gate, and push + PR reminder at end.
+# Enforces GitHub Flow branch creation at start, automated TDD verification, and push + PR at end.
+# GitHub operations use the GitHub MCP tool, not the gh CLI.
 
 [workflow]
 
 persistent_facts = [
-  "The project GitHub repository is mateozacar/dark-factory.",
+  "The project GitHub repository is mateozacar/dark-factory (owner: mateozacar, repo: dark-factory).",
   "Branch convention (GitHub Flow): feature/DARK-{num}-{slug} for new features, bugfix/DARK-{num}-{slug} for bug fixes, hotfix/DARK-{num}-{slug} for urgent fixes, chore/DARK-{num}-{slug} for maintenance. All branches are created from main.",
-  "file:{project-root}/_bmad-output/planning-artifacts/*.md",
-  "TDD mandate: Tests are always written first and the human approves the test contract before any implementation code is written. The two-phase implementation_handoff enforces this — never collapse the phases or skip the human gate.",
+  "file:{project-root}/AGENTS.md",
+  "file:{project-root}/_bmad-output/planning-artifacts/**/*.md",
+  "TDD mandate: Tests are written first. They must FAIL (not error) before implementation begins. The automated gate verifies this — no human approval is needed, the test output is the gate.",
 ]
 
 activation_steps_append = [
@@ -21,6 +23,10 @@ Then run these git commands in sequence:
   2. git pull origin main
   3. git checkout -b {branch-name}
 Confirm the branch was created successfully and display the branch name before proceeding.
+Then update the GitHub issue using the GitHub MCP tool:
+  1. Ensure the label "in-progress" exists in mateozacar/dark-factory (color #0075ca). Create it if missing.
+  2. Add the label "in-progress" to issue {num}.
+  3. Add a comment to issue {num}: "Branch created: `{branch-name}` — implementation starting."
 """,
 ]
 
@@ -30,28 +36,64 @@ After implementation and review are complete:
 2. Create a commit using Conventional Commits format referencing the issue number:
    "feat|fix|chore: <short description> (#<issue-num>)"
 3. Push the branch: git push -u origin {branch-name}
-4. Create a Pull Request targeting main using the GitHub CLI:
-   gh pr create --base main --title "<same title as the commit>" --body "$(cat <<'EOF'
-## Summary
-<1-3 bullet points summarising what was implemented>
+4. Use the GitHub MCP tool to create a Pull Request in mateozacar/dark-factory:
+   - base: "main"
+   - head: "{branch-name}"
+   - title: same as the commit title
+   - body:
+     ## Summary
+     <1-3 bullet points summarising what was implemented>
 
-## Test plan
-- [ ] All tests pass (`uv run pytest`)
-- [ ] Ruff and mypy pass (`uv run ruff check . && uv run mypy src/`)
-- [ ] Manually verified against acceptance criteria in the spec
+     ## Test plan
+     - [ ] All tests pass (`uv run pytest`)
+     - [ ] Ruff and mypy pass (`uv run ruff check . && uv run mypy src/`)
+     - [ ] Verified against acceptance criteria in the spec
 
-Closes #<issue-num>
-EOF
-)"
-5. Report the PR URL to the user.
+     Closes #<issue-num>
+5. Use the GitHub MCP tool to add a comment to issue <issue-num>:
+   "PR created: <pr-url> — CI running. Issue will close automatically when PR merges."
+6. Report the PR URL to the user.
+7. Calculate and persist session cost:
+
+   PRICING REFERENCE (per million tokens):
+   | Model              | Input   | Output  |
+   |--------------------|---------|---------|
+   | Claude Opus 4      | $15.00  | $75.00  |
+   | Claude Sonnet 4.x  | $3.00   | $15.00  |
+   | Claude Haiku 3.5   | $0.80   | $4.00   |
+   | GPT-4o             | $2.50   | $10.00  |
+   | GPT-4o-mini        | $0.15   | $0.60   |
+   | o3                 | $10.00  | $40.00  |
+   | o4-mini            | $1.10   | $4.40   |
+
+   a. Estimate tokens: total characters processed (spec + source files loaded + conversation + outputs) / 4.
+      Split into input (context + messages received) and output (everything generated).
+   b. Calculate cost using the table above for the model you are running on.
+   c. Append a row to the `## Cost Log` section at the bottom of {spec_file}.
+      If the section does not exist, add it:
+      ## Cost Log
+      | Date (UTC) | Phase | Model | ~Input tkns | ~Output tkns | ~Cost USD |
+      |------------|-------|-------|------------|--------------|-----------|
+      Then append:
+      | YYYY-MM-DD | build | <model> | <n> | <n> | $<n> |
+   d. Append a row to `{project-root}/_bmad-output/implementation-artifacts/cost-log.md`.
+      Create the file with a header if it does not exist:
+      # Cost Log
+      | Date (UTC) | Issue | Phase | Model | ~Input tkns | ~Output tkns | ~Cost USD |
+      |------------|-------|-------|-------|------------|--------------|-----------|
+      Then append:
+      | YYYY-MM-DD | #<issue-num> | build | <model> | <n> | <n> | $<n> |
+   e. Use the GitHub MCP tool to add a comment to issue <issue-num>:
+      "**Session cost (build):** model `<model>` — ~<n> input tokens, ~<n> output tokens — est. **$<n>**
+      _(approximation based on character count / 4; verify in API dashboard)_"
 """
 
-# TDD: split implementation into two phases separated by a required human gate.
-# Rationale: an agent can write tests and implementation simultaneously, so the only
-# thing that preserves TDD's value is a human checkpoint between the behavioral
-# contract (tests) and the code that satisfies it.
+# TDD: two phases separated by an automated verification gate — no human approval.
+# The gate checks that tests FAIL for the right reason (missing implementation),
+# not due to syntax errors or incorrect setup. If the gate passes, Phase 2 starts
+# automatically. If it fails, Phase 1 is retried with corrections (max 2 retries).
 implementation_handoff = """
-## TDD Implementation — Two Phases with Required Human Gate
+## TDD Implementation — Two Phases with Automated Gate
 
 ### PHASE 1 — Write Tests First (no implementation code)
 
@@ -66,20 +108,28 @@ Launch a subagent with no prior conversation context, with this prompt:
 > - If the spec contains an I/O & Edge-Case Matrix, every matrix row must have at least one covering test.
 >
 > When done, report:
-> 1. Every test file written (CWD-relative paths with line notation, e.g. src/foo.test.ts:12).
+> 1. Every test file written (CWD-relative paths with line notation, e.g. tests/unit/test_foo.py:12).
 > 2. The exact command to run the tests.
-> 3. The failing test output — run the tests and paste the result to confirm they are real and not vacuous.
+> 3. The failing test output — run the tests and paste the complete result.
 
-### HUMAN GATE — required, do not skip or merge with Phase 2
+### AUTOMATED GATE — verify tests fail correctly, then proceed
 
-Present the subagent's test report to the user:
-- List the test files and what behavioural contract each encodes.
-- Show the failing test output (proves tests are real).
+After receiving the Phase 1 report, run this verification autonomously (no human approval):
 
-HALT and ask: `[A] Approve test contract — proceed to implementation` | `[E] Edit tests`
-
-- **E**: Collect the requested changes, apply them (or relaunch the test-writing subagent with the corrections), then return to this HUMAN GATE.
-- **A**: Proceed to Phase 2.
+1. Parse the test output from the report.
+2. Check: does the output contain FAILED or FAIL lines? → gate PASSES.
+3. Check: does the output contain ERROR, SyntaxError, ImportError before any test ran? → gate FAILS.
+4. If gate PASSES:
+   - Use the GitHub MCP tool to add a comment to issue {num} in mateozacar/dark-factory:
+     "Tests written and verified failing. Gate passed — starting implementation."
+   - Proceed immediately to Phase 2.
+5. If gate FAILS → relaunch the Phase 1 subagent with these added instructions:
+   "The previous test run produced errors before tests executed (syntax/import issues). Fix those errors.
+    The tests must reach the assertion stage and fail there — not before."
+   Retry the gate. Maximum 2 retries. If still failing after 2 retries:
+   - Use the GitHub MCP tool to add a comment to issue {num}:
+     "BLOCKED: test gate failed after 2 retries. Manual intervention required."
+   - HALT.
 
 ### PHASE 2 — Implement to Green
 
@@ -87,7 +137,7 @@ Launch a subagent with no prior conversation context, with this prompt:
 
 > Read {spec_file} fully — it is your sole source of truth. Load every file listed in its frontmatter `context:` before you start.
 >
-> The test suite is already written and the human has approved it. Your job is ONLY to write the implementation code that makes those tests pass — do NOT add, remove, or modify any test file.
+> The test suite is already written and verified. Your job is ONLY to write the implementation code that makes those tests pass — do NOT add, remove, or modify any test file.
 >
-> When done: run the full test suite and report what you changed, the complete test results (all must pass), and anything left incomplete or risky.
+> When done: run `uv run pytest tests/ -q` and `uv run ruff check . && uv run mypy src/` — report the complete output. All tests must pass and linting must be clean before reporting done.
 """

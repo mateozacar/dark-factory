@@ -6,9 +6,10 @@
 spec_template = "_bmad/custom/bmad-spec-dark-factory-template.md"
 
 persistent_facts = [
-  "The project GitHub repository is mateozacar/dark-factory.",
+  "The project GitHub repository is mateozacar/dark-factory (owner: mateozacar, repo: dark-factory).",
   "Branch convention (GitHub Flow): feature/DARK-{num}-{slug} for new features, bugfix/DARK-{num}-{slug} for bug fixes, hotfix/DARK-{num}-{slug} for urgent fixes, chore/DARK-{num}-{slug} for maintenance. All branches are created from main.",
-  "file:{project-root}/_bmad-output/planning-artifacts/*.md",
+  "file:{project-root}/AGENTS.md",
+  "file:{project-root}/_bmad-output/planning-artifacts/**/*.md",
 ]
 
 on_complete = """
@@ -24,4 +25,35 @@ After saving the spec artifacts:
 4. Report the created issue number and URL to the user.
 5. Remind the user: to start development on this story, create the branch following the convention
    feature/DARK-{issue-number}-{short-slug}.
+6. Calculate and persist session cost:
+
+   PRICING REFERENCE (per million tokens):
+   | Model              | Input   | Output  |
+   |--------------------|---------|---------|
+   | Claude Opus 4      | $15.00  | $75.00  |
+   | Claude Sonnet 4.x  | $3.00   | $15.00  |
+   | Claude Haiku 3.5   | $0.80   | $4.00   |
+   | GPT-4o             | $2.50   | $10.00  |
+   | GPT-4o-mini        | $0.15   | $0.60   |
+   | o3                 | $10.00  | $40.00  |
+   | o4-mini            | $1.10   | $4.40   |
+
+   a. Estimate tokens: total characters processed (context loaded + conversation + outputs) / 4.
+      Split into input (context + messages received) and output (everything generated).
+   b. Calculate cost using the table above for the model you are running on.
+   c. Append a `## Cost Log` section to the SPEC.md you just wrote (or update it if it already exists):
+      Format — one row per session run:
+      | Date (UTC) | Phase | Model | ~Input tkns | ~Output tkns | ~Cost USD |
+      |------------|-------|-------|------------|--------------|-----------|
+      | YYYY-MM-DD | spec  | <model> | <n> | <n> | $<n> |
+   d. Append a row to `{project-root}/_bmad-output/implementation-artifacts/cost-log.md`.
+      Create the file with a header if it does not exist:
+      # Cost Log
+      | Date (UTC) | Issue | Phase | Model | ~Input tkns | ~Output tkns | ~Cost USD |
+      |------------|-------|-------|-------|------------|--------------|-----------|
+      Then append:
+      | YYYY-MM-DD | #<issue-num> | spec | <model> | <n> | <n> | $<n> |
+   e. Use the GitHub MCP tool to add a comment to issue <issue-num>:
+      "**Session cost (spec):** model `<model>` — ~<n> input tokens, ~<n> output tokens — est. **$<n>**
+      _(approximation based on character count / 4; verify in API dashboard)_"
 """
