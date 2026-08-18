@@ -104,6 +104,12 @@ deferred:
 - `uv run ruff check .` -- expected: no violations
 - `uv run mypy src/` -- expected: no errors
 
+## Cost Log
+
+| Date (UTC) | Phase | Model | ~Input tkns | ~Output tkns | ~Cost USD |
+|------------|-------|-------|-------------|--------------|-----------|
+| 2026-08-18 | build-auto | claude-sonnet-4-6 | 285000 | 40000 | $1.46 |
+
 ## Spec Change Log
 
 ## Auto Run Result
