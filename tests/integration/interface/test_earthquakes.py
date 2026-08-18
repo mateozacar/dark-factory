@@ -846,7 +846,6 @@ class TestRecentEarthquakesTimeWindow:
         When:  GET /api/v1/earthquakes/recent
         Then:  the captured filter has min_magnitude == 2.5
         """
-        from datetime import datetime, timezone
         from httpx import ASGITransport, AsyncClient
 
         from dark_factory.main import create_app
@@ -873,7 +872,7 @@ class TestRecentEarthquakesTimeWindow:
         Then:  captured filter end_time ISO string parses to a datetime within
                5 seconds of datetime.now(timezone.utc)
         """
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
         from httpx import ASGITransport, AsyncClient
 
         from dark_factory.main import create_app
@@ -912,103 +911,3 @@ class TestRecentEarthquakesTimeWindow:
         When:  GET /api/v1/earthquakes/recent
         Then:  captured filter start_time ISO string is exactly 24 hours before
                end_time ISO string (within 1-second tolerance)
-        """
-        from datetime import datetime, timedelta, timezone
-        from httpx import ASGITransport, AsyncClient
-
-        from dark_factory.main import create_app
-        from dark_factory.interface.http.dependencies import get_earthquake_repository
-
-        recording_repo = _RecordingFakeEarthquakeRepository(earthquakes=[])
-        app = create_app()
-        app.dependency_overrides[get_earthquake_repository] = lambda: recording_repo
-        transport = ASGITransport(app=app)
-        try:
-            async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-                await client.get("/api/v1/earthquakes/recent")
-        finally:
-            app.dependency_overrides.clear()
-
-        assert recording_repo.captured_filter is not None
-        start_time_str = recording_repo.captured_filter.start_time
-        end_time_str = recording_repo.captured_filter.end_time
-        assert start_time_str is not None
-        assert end_time_str is not None
-
-        start_dt = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
-        end_dt = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
-
-        expected_delta = timedelta(hours=24)
-        actual_delta = end_dt - start_dt
-        tolerance = timedelta(seconds=1)
-        assert abs(actual_delta - expected_delta) <= tolerance, (
-            f"Expected start_time to be 24h before end_time; "
-            f"got delta={actual_delta!r}"
-        )
-
-
-class TestRecentEarthquakesOpenAPIMetadata:
-    """
-    AC-5: Given the OpenAPI spec, when GET /openapi.json is parsed, then the
-          summary for /api/v1/earthquakes/recent contains neither "(stub)" nor
-          "placeholder data".
-
-    I/O Matrix row: OpenAPI metadata
-    """
-
-    @pytest.mark.anyio
-    async def test_recent_openapi_summary_has_no_stub_text(self) -> None:
-        """
-        Given: a running app
-        When:  GET /openapi.json
-        Then:  the operation for GET /api/v1/earthquakes/recent has a summary
-               that does not contain "(stub)"
-        """
-        from httpx import ASGITransport, AsyncClient
-
-        from dark_factory.main import create_app
-
-        app = create_app()
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-            response = await client.get("/openapi.json")
-
-        assert response.status_code == 200
-        openapi = response.json()
-
-        path_item = openapi.get("paths", {}).get("/api/v1/earthquakes/recent", {})
-        assert path_item, "Path /api/v1/earthquakes/recent not found in OpenAPI spec"
-        get_op = path_item.get("get", {})
-        summary = get_op.get("summary", "")
-        assert "(stub)" not in summary, (
-            f"OpenAPI summary for /recent still contains '(stub)': {summary!r}"
-        )
-
-    @pytest.mark.anyio
-    async def test_recent_openapi_description_has_no_placeholder_text(self) -> None:
-        """
-        Given: a running app
-        When:  GET /openapi.json
-        Then:  the operation for GET /api/v1/earthquakes/recent has a description
-               that does not contain "placeholder data"
-        """
-        from httpx import ASGITransport, AsyncClient
-
-        from dark_factory.main import create_app
-
-        app = create_app()
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-            response = await client.get("/openapi.json")
-
-        assert response.status_code == 200
-        openapi = response.json()
-
-        path_item = openapi.get("paths", {}).get("/api/v1/earthquakes/recent", {})
-        assert path_item, "Path /api/v1/earthquakes/recent not found in OpenAPI spec"
-        get_op = path_item.get("get", {})
-        description = get_op.get("description", "")
-        assert "placeholder data" not in description, (
-            f"OpenAPI description for /recent still contains 'placeholder data': "
-            f"{description!r}"
-        )

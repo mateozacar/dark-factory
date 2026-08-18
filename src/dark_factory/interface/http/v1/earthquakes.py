@@ -16,7 +16,6 @@ from dark_factory.application.earthquake.handlers import (
 )
 from dark_factory.application.earthquake.queries import GetAftershocks, GetEarthquakes
 from dark_factory.domain.earthquake.exceptions import EarthquakeNotFound
-from dark_factory.domain.earthquake.repositories import EarthquakeRepository
 from dark_factory.domain.earthquake.value_objects import EarthquakeFilter
 from dark_factory.interface.http.dependencies import get_earthquake_repository
 from dark_factory.interface.http.v1.schemas import (
