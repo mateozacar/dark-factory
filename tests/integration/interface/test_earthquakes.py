@@ -30,6 +30,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from datetime import UTC
 
 if TYPE_CHECKING:
     from dark_factory.domain.earthquake.entities import Earthquake
@@ -618,3 +619,396 @@ class TestAftershocksEndpoint:
         assert "stats" in body
         assert "sequence_assessment" in body
         assert body["sequence_assessment"] == "decaying"
+
+
+# ---------------------------------------------------------------------------
+# Recent earthquakes endpoint — GET /api/v1/earthquakes/recent
+#
+# Spec: spec-19-recent-earthquakes-endpoint.md
+# AC covered:
+#   AC-1  Happy path — 2 earthquakes  → HTTP 200 + GeoJSONFeatureCollection(2)
+#   AC-2  Empty results               → HTTP 200 + {"type":"FeatureCollection","features":[]}
+#   AC-3  httpx.HTTPStatusError       → HTTP 502
+#   AC-4  Time-window / filter check  → min_magnitude=2.5, end~now, start=end−24h
+#   AC-5  OpenAPI metadata            → summary has no "(stub)", no "placeholder data"
+# ---------------------------------------------------------------------------
+
+
+class _RecordingFakeEarthquakeRepository:
+    """Fake that records the filter argument passed to get_all()."""
+
+    def __init__(self, earthquakes: list["Earthquake"] | None = None) -> None:
+        self._store: list["Earthquake"] = earthquakes or []
+        self.captured_filter: "EarthquakeFilter | None" = None
+
+    async def get_all(self, filters: "EarthquakeFilter | None" = None) -> list["Earthquake"]:
+        self.captured_filter = filters
+        return list(self._store)
+
+    async def get_by_id(self, earthquake_id: str) -> "Earthquake | None":
+        for eq in self._store:
+            if eq.id == earthquake_id:
+                return eq
+        return None
+
+
+class TestRecentEarthquakesHappyPath:
+    """
+    AC-1: Given a GET /api/v1/earthquakes/recent with a fake repo returning 2 earthquakes,
+          when the endpoint is called, then HTTP 200 and a GeoJSONFeatureCollection with
+          2 features is returned.
+    """
+
+    @pytest.mark.anyio
+    async def test_recent_returns_200(self) -> None:
+        """
+        Given: DI overridden with a fake repo containing 2 earthquakes
+        When:  GET /api/v1/earthquakes/recent
+        Then:  HTTP 200
+
+        I/O Matrix row: Happy path — results
+        """
+        client, app = await _make_client_with_fake_repo(_make_sample_earthquakes())
+        try:
+            async with client:
+                response = await client.get("/api/v1/earthquakes/recent")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+
+    @pytest.mark.anyio
+    async def test_recent_returns_feature_collection_type(self) -> None:
+        """
+        Given: DI overridden with a fake repo containing 2 earthquakes
+        When:  GET /api/v1/earthquakes/recent
+        Then:  response JSON has "type" == "FeatureCollection"
+
+        I/O Matrix row: Happy path — results
+        """
+        client, app = await _make_client_with_fake_repo(_make_sample_earthquakes())
+        try:
+            async with client:
+                response = await client.get("/api/v1/earthquakes/recent")
+        finally:
+            app.dependency_overrides.clear()
+
+        body = response.json()
+        assert body["type"] == "FeatureCollection"
+
+    @pytest.mark.anyio
+    async def test_recent_returns_two_features(self) -> None:
+        """
+        Given: DI overridden with a fake repo containing 2 earthquakes
+        When:  GET /api/v1/earthquakes/recent
+        Then:  response JSON has "features" list with 2 entries
+
+        I/O Matrix row: Happy path — results
+        """
+        client, app = await _make_client_with_fake_repo(_make_sample_earthquakes())
+        try:
+            async with client:
+                response = await client.get("/api/v1/earthquakes/recent")
+        finally:
+            app.dependency_overrides.clear()
+
+        body = response.json()
+        assert "features" in body
+        assert isinstance(body["features"], list)
+        assert len(body["features"]) == 2
+
+    @pytest.mark.anyio
+    async def test_recent_features_have_correct_geojson_shape(self) -> None:
+        """
+        Given: fake repo with Earthquake(id="us7000abc1", magnitude=5.2,
+               longitude=-122.1, latitude=37.5, depth=10.0)
+        When:  GET /api/v1/earthquakes/recent
+        Then:  first feature has type="Feature", geometry.type="Point",
+               coordinates=[-122.1, 37.5, 10.0], properties.id="us7000abc1",
+               properties.mag=5.2
+
+        I/O Matrix row: GeoJSON Feature shape
+        """
+        client, app = await _make_client_with_fake_repo(_make_sample_earthquakes())
+        try:
+            async with client:
+                response = await client.get("/api/v1/earthquakes/recent")
+        finally:
+            app.dependency_overrides.clear()
+
+        body = response.json()
+        first = body["features"][0]
+        assert first["type"] == "Feature"
+        assert first["geometry"]["type"] == "Point"
+        coords = first["geometry"]["coordinates"]
+        assert coords[0] == -122.1
+        assert coords[1] == 37.5
+        assert coords[2] == 10.0
+        assert first["properties"]["id"] == "us7000abc1"
+        assert first["properties"]["mag"] == 5.2
+
+
+class TestRecentEarthquakesEmptyResult:
+    """
+    AC-2: Given a GET /api/v1/earthquakes/recent with a fake repo returning [],
+          when the endpoint is called, then HTTP 200 and
+          {"type":"FeatureCollection","features":[]} is returned.
+
+    I/O Matrix row: Empty results
+    """
+
+    @pytest.mark.anyio
+    async def test_recent_empty_repo_returns_200_with_empty_features(self) -> None:
+        """
+        Given: DI overridden with a fake repo containing NO earthquakes
+        When:  GET /api/v1/earthquakes/recent
+        Then:  HTTP 200, body has type="FeatureCollection" and features=[]
+        """
+        client, app = await _make_client_with_fake_repo(earthquakes=[])
+        try:
+            async with client:
+                response = await client.get("/api/v1/earthquakes/recent")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["type"] == "FeatureCollection"
+        assert body["features"] == []
+
+
+class TestRecentEarthquakesUpstreamError:
+    """
+    AC-3: Given a GET /api/v1/earthquakes/recent when the repo raises
+          httpx.HTTPStatusError, then HTTP 502 is returned.
+
+    I/O Matrix row: USGS unreachable
+    """
+
+    @pytest.mark.anyio
+    async def test_recent_repo_http_error_returns_502(self) -> None:
+        """
+        Given: DI overridden with a fake repo whose get_all raises
+               httpx.HTTPStatusError
+        When:  GET /api/v1/earthquakes/recent
+        Then:  HTTP 502
+
+        I/O Matrix row: USGS unreachable
+        """
+        import httpx
+        from httpx import ASGITransport, AsyncClient
+
+        from dark_factory.main import create_app
+        from dark_factory.interface.http.dependencies import get_earthquake_repository
+
+        class _HTTPErrorRepo:
+            async def get_all(self, filters: object = None) -> list:
+                response = httpx.Response(
+                    503,
+                    request=httpx.Request("GET", "https://earthquake.usgs.gov"),
+                )
+                raise httpx.HTTPStatusError(
+                    "USGS upstream error",
+                    request=response.request,
+                    response=response,
+                )
+
+            async def get_by_id(self, earthquake_id: str) -> None:
+                return None
+
+        app = create_app()
+        app.dependency_overrides[get_earthquake_repository] = lambda: _HTTPErrorRepo()
+        transport = ASGITransport(app=app)
+        try:
+            async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+                response = await client.get("/api/v1/earthquakes/recent")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 502
+
+
+class TestRecentEarthquakesTimeWindow:
+    """
+    AC-4: Given a recording fake repo that captures the filter passed to get_all(),
+          when GET /api/v1/earthquakes/recent is called, then the captured filter
+          has min_magnitude=2.5, end_time ISO string is within 5 seconds of
+          datetime.now(timezone.utc), and start_time ISO string is exactly
+          24 hours before end_time.
+
+    I/O Matrix row: Time window
+    """
+
+    @pytest.mark.anyio
+    async def test_recent_filter_has_min_magnitude_2_5(self) -> None:
+        """
+        Given: a recording fake repo
+        When:  GET /api/v1/earthquakes/recent
+        Then:  the captured filter has min_magnitude == 2.5
+        """
+        from datetime import datetime, timezone
+        from httpx import ASGITransport, AsyncClient
+
+        from dark_factory.main import create_app
+        from dark_factory.interface.http.dependencies import get_earthquake_repository
+
+        recording_repo = _RecordingFakeEarthquakeRepository(earthquakes=[])
+        app = create_app()
+        app.dependency_overrides[get_earthquake_repository] = lambda: recording_repo
+        transport = ASGITransport(app=app)
+        try:
+            async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+                await client.get("/api/v1/earthquakes/recent")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert recording_repo.captured_filter is not None
+        assert recording_repo.captured_filter.min_magnitude == 2.5
+
+    @pytest.mark.anyio
+    async def test_recent_filter_end_time_is_approximately_now(self) -> None:
+        """
+        Given: a recording fake repo, with call time recorded just before the request
+        When:  GET /api/v1/earthquakes/recent
+        Then:  captured filter end_time ISO string parses to a datetime within
+               5 seconds of datetime.now(timezone.utc)
+        """
+        from datetime import datetime, timedelta, timezone
+        from httpx import ASGITransport, AsyncClient
+
+        from dark_factory.main import create_app
+        from dark_factory.interface.http.dependencies import get_earthquake_repository
+
+        recording_repo = _RecordingFakeEarthquakeRepository(earthquakes=[])
+        app = create_app()
+        app.dependency_overrides[get_earthquake_repository] = lambda: recording_repo
+        transport = ASGITransport(app=app)
+
+        before = datetime.now(UTC)
+        try:
+            async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+                await client.get("/api/v1/earthquakes/recent")
+        finally:
+            app.dependency_overrides.clear()
+        after = datetime.now(UTC)
+
+        assert recording_repo.captured_filter is not None
+        end_time_str = recording_repo.captured_filter.end_time
+        assert end_time_str is not None
+
+        # Parse ISO 8601 — handle both Z and +00:00 suffixes
+        end_time_str_normalized = end_time_str.replace("Z", "+00:00")
+        end_dt = datetime.fromisoformat(end_time_str_normalized)
+
+        tolerance = timedelta(seconds=5)
+        assert before - tolerance <= end_dt <= after + tolerance, (
+            f"end_time {end_dt!r} is not within 5s of [{before!r}, {after!r}]"
+        )
+
+    @pytest.mark.anyio
+    async def test_recent_filter_start_time_is_24h_before_end_time(self) -> None:
+        """
+        Given: a recording fake repo
+        When:  GET /api/v1/earthquakes/recent
+        Then:  captured filter start_time ISO string is exactly 24 hours before
+               end_time ISO string (within 1-second tolerance)
+        """
+        from datetime import datetime, timedelta, timezone
+        from httpx import ASGITransport, AsyncClient
+
+        from dark_factory.main import create_app
+        from dark_factory.interface.http.dependencies import get_earthquake_repository
+
+        recording_repo = _RecordingFakeEarthquakeRepository(earthquakes=[])
+        app = create_app()
+        app.dependency_overrides[get_earthquake_repository] = lambda: recording_repo
+        transport = ASGITransport(app=app)
+        try:
+            async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+                await client.get("/api/v1/earthquakes/recent")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert recording_repo.captured_filter is not None
+        start_time_str = recording_repo.captured_filter.start_time
+        end_time_str = recording_repo.captured_filter.end_time
+        assert start_time_str is not None
+        assert end_time_str is not None
+
+        start_dt = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
+        end_dt = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
+
+        expected_delta = timedelta(hours=24)
+        actual_delta = end_dt - start_dt
+        tolerance = timedelta(seconds=1)
+        assert abs(actual_delta - expected_delta) <= tolerance, (
+            f"Expected start_time to be 24h before end_time; "
+            f"got delta={actual_delta!r}"
+        )
+
+
+class TestRecentEarthquakesOpenAPIMetadata:
+    """
+    AC-5: Given the OpenAPI spec, when GET /openapi.json is parsed, then the
+          summary for /api/v1/earthquakes/recent contains neither "(stub)" nor
+          "placeholder data".
+
+    I/O Matrix row: OpenAPI metadata
+    """
+
+    @pytest.mark.anyio
+    async def test_recent_openapi_summary_has_no_stub_text(self) -> None:
+        """
+        Given: a running app
+        When:  GET /openapi.json
+        Then:  the operation for GET /api/v1/earthquakes/recent has a summary
+               that does not contain "(stub)"
+        """
+        from httpx import ASGITransport, AsyncClient
+
+        from dark_factory.main import create_app
+
+        app = create_app()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await client.get("/openapi.json")
+
+        assert response.status_code == 200
+        openapi = response.json()
+
+        path_item = openapi.get("paths", {}).get("/api/v1/earthquakes/recent", {})
+        assert path_item, "Path /api/v1/earthquakes/recent not found in OpenAPI spec"
+        get_op = path_item.get("get", {})
+        summary = get_op.get("summary", "")
+        assert "(stub)" not in summary, (
+            f"OpenAPI summary for /recent still contains '(stub)': {summary!r}"
+        )
+
+    @pytest.mark.anyio
+    async def test_recent_openapi_description_has_no_placeholder_text(self) -> None:
+        """
+        Given: a running app
+        When:  GET /openapi.json
+        Then:  the operation for GET /api/v1/earthquakes/recent has a description
+               that does not contain "placeholder data"
+        """
+        from httpx import ASGITransport, AsyncClient
+
+        from dark_factory.main import create_app
+
+        app = create_app()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await client.get("/openapi.json")
+
+        assert response.status_code == 200
+        openapi = response.json()
+
+        path_item = openapi.get("paths", {}).get("/api/v1/earthquakes/recent", {})
+        assert path_item, "Path /api/v1/earthquakes/recent not found in OpenAPI spec"
+        get_op = path_item.get("get", {})
+        description = get_op.get("description", "")
+        assert "placeholder data" not in description, (
+            f"OpenAPI description for /recent still contains 'placeholder data': "
+            f"{description!r}"
+        )
