@@ -64,7 +64,11 @@ async def list_earthquakes(
             type="Feature",
             geometry=GeoJSONGeometry(
                 type="Point",
-                coordinates=[eq.longitude or 0.0, eq.latitude or 0.0, eq.depth or 0.0],
+                coordinates=[
+                    eq.longitude if eq.longitude is not None else 0.0,
+                    eq.latitude if eq.latitude is not None else 0.0,
+                    eq.depth if eq.depth is not None else 0.0,
+                ],
             ),
             properties=GeoJSONFeatureProperties(id=eq.id, mag=eq.magnitude),
         )
@@ -111,7 +115,11 @@ async def recent_earthquakes(
             type="Feature",
             geometry=GeoJSONGeometry(
                 type="Point",
-                coordinates=[eq.longitude or 0.0, eq.latitude or 0.0, eq.depth or 0.0],
+                coordinates=[
+                    eq.longitude if eq.longitude is not None else 0.0,
+                    eq.latitude if eq.latitude is not None else 0.0,
+                    eq.depth if eq.depth is not None else 0.0,
+                ],
             ),
             properties=GeoJSONFeatureProperties(id=eq.id, mag=eq.magnitude),
         )

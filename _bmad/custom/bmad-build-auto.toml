@@ -46,8 +46,8 @@ Before starting implementation, extract the issue number and change type from th
 - Confirm the branch was created. If it already exists, check it out — do not abort.
 - Update the GitHub issue via gh CLI:
   1. Ensure these labels exist in mateozacar/dark-factory (create if missing):
-       gh label create "in-progress" --color "#0075ca" --force --repo mateozacar/dark-factory
-       gh label create "blocked" --color "#d93f0b" --force --repo mateozacar/dark-factory
+       gh label create "in-progress" --color "0075ca" --force --repo mateozacar/dark-factory
+       gh label create "blocked" --color "d93f0b" --force --repo mateozacar/dark-factory
   2. Add the label "in-progress" to issue {num}:
        gh issue edit {num} --add-label "in-progress" --repo mateozacar/dark-factory
   3. Add a comment to issue {num}:
