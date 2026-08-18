@@ -148,3 +148,38 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: python .github/scripts/pr_autofix.py
+
+  automerge:
+    name: Enable Auto-merge
+    needs: review
+    # Enable auto-merge when:
+    # (a) review approved — clean PR, merge after CI
+    # (b) review still requests changes but this is already an [ai-fix] commit —
+    #     threshold of 1 fix cycle reached, prevent infinite loop, merge after CI
+    if: |
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (
+        needs.review.outputs.needs_fix == 'false' ||
+        (
+          needs.review.outputs.needs_fix == 'true' &&
+          contains(github.event.pull_request.head.commit.message, '[ai-fix]')
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pull-requests: write
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable auto-merge via GitHub API
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          NEEDS_FIX: ${{ needs.review.outputs.needs_fix }}
+          HEAD_COMMIT_MSG: ${{ github.event.pull_request.head.commit.message }}
+        run: python .github/scripts/pr_automerge.py

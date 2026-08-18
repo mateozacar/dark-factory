@@ -2,15 +2,24 @@
 # Loop completamente desatendido: spec → branch → tests → impl → review → commit → PR.
 # Ningun human gate. La unica intervencion humana es escribir el intent inicial.
 # GitHub operations use the GitHub MCP tool, not the gh CLI.
+# Model tiers: cheap (discovery + test scaffolding) and deep (implementation) — see _bmad/custom/config.toml [models].
 
 [workflow]
 
+# CONTEXT ORDER — static content first for prompt caching.
+# AGENTS.md and architecture rarely change → stable cached prefix.
+# Specs are NOT pre-loaded here — each subagent loads {spec_file} directly to avoid
+# paying for all specs on every call (context as budget: only load what's needed).
+# Critical mandates are last in the block → never buried in the middle of large context.
 persistent_facts = [
+  # 1. Most static — project rules (primary cache candidate)
+  "file:{project-root}/AGENTS.md",
+  # 2. Rarely changes — architecture spine only (excludes briefs and memlogs)
+  "file:{project-root}/_bmad-output/planning-artifacts/architecture/*/ARCHITECTURE-SPINE.md",
+  # 3. Semi-static — project conventions
   "The project GitHub repository is mateozacar/dark-factory (owner: mateozacar, repo: dark-factory).",
   "Branch convention (GitHub Flow): feature/DARK-{num}-{slug} for new features, bugfix/DARK-{num}-{slug} for bug fixes, hotfix/DARK-{num}-{slug} for urgent fixes, chore/DARK-{num}-{slug} for maintenance. All branches are created from main.",
-  "file:{project-root}/AGENTS.md",
-  "file:{project-root}/_bmad-output/planning-artifacts/**/*.md",
-  "file:{project-root}/_bmad-output/specs/**/*.md",
+  # 4. Critical mandates — last in static context, just before the actionable prompt (never buried)
   "TDD mandate: Tests MUST be written first and MUST fail before implementation begins. The automated gate is the only gate — no human approval.",
   "Quality gate: ALL of the following must pass before the PR is created: uv run pytest tests/ -q (zero failures), uv run ruff check . (zero violations), uv run mypy src/ (zero errors).",
 ]
@@ -25,6 +34,7 @@ Before starting implementation, extract the issue number and change type from th
     body: <spec description and acceptance criteria>
     labels: ["spec-ready"]
   Use the returned issue number as {num}.
+  Add the created issue to the GitHub Project "Earthquake" (owner: mateozacar, project number: 1, project node ID: PVT_kwHOAKfMDs4BgQ4o) using the GitHub MCP tool.
 - Determine {type}: feature | bugfix | hotfix | chore — infer from the spec content if not explicit.
 - Build the branch name: {type}/DARK-{num}-{short-slug} where {short-slug} is a 2-4 word kebab-case summary.
 - Run in sequence:
@@ -67,28 +77,38 @@ After all review layers pass:
 
      Closes #<issue-num>
 6. Use the GitHub MCP tool to add a comment to issue <issue-num>:
-   "PR created: <pr-url> — CI running, auto-merge enabled. Issue will close automatically when PR merges."
-7. Enable auto-merge — merge only triggers after CI passes (requires branch protection with required status checks):
-   gh pr merge --auto --squash
-   If auto-merge is unavailable, skip and note it in the report.
-8. Report the PR URL and auto-merge status.
+   "PR created: <pr-url> — CI and automated review running. Auto-merge will be enabled by the review pipeline once the review approves or the fix threshold is reached."
+7. DO NOT run `gh pr merge` — auto-merge is the review pipeline's responsibility.
+   The PR Review workflow (pr-review.yml) enables auto-merge after:
+   - The review approves (APPROVE decision), or
+   - One auto-fix cycle has completed (threshold = 1 cycle, prevents infinite loops).
+   CI is always required before the actual merge happens.
+8. Report the PR URL.
 9. Calculate and persist session cost:
 
    PRICING REFERENCE (per million tokens):
-   | Model              | Input   | Output  |
-   |--------------------|---------|---------|
-   | Claude Opus 4      | $15.00  | $75.00  |
-   | Claude Sonnet 4.x  | $3.00   | $15.00  |
-   | Claude Haiku 3.5   | $0.80   | $4.00   |
-   | GPT-4o             | $2.50   | $10.00  |
-   | GPT-4o-mini        | $0.15   | $0.60   |
-   | o3                 | $10.00  | $40.00  |
-   | o4-mini            | $1.10   | $4.40   |
+   | Model                           | Input   | Output  |
+   |---------------------------------|---------|---------|
+   | Claude Opus 4 (deep)            | $15.00  | $75.00  |
+   | Claude Opus 4 — cache write     | $18.75  | $75.00  |
+   | Claude Opus 4 — cache read      | $1.50   | $75.00  |
+   | Claude Sonnet 4.x (cheap)       | $3.00   | $15.00  |
+   | Claude Sonnet 4.x — cache write | $3.75   | $15.00  |
+   | Claude Sonnet 4.x — cache read  | $0.30   | $15.00  |
+   | Claude Haiku 4.5                | $0.80   | $4.00   |
+   | Claude Haiku 4.5 — cache read   | $0.08   | $4.00   |
+   | GPT-4o                          | $2.50   | $10.00  |
+   | GPT-4o-mini                     | $0.15   | $0.60   |
+   | o3                              | $10.00  | $40.00  |
+   | o4-mini                         | $1.10   | $4.40   |
 
-   a. Estimate tokens: total characters processed across the full loop (spec + all source files loaded +
-      all subagent prompts and outputs + conversation) / 4.
-      Split into input (all context + prompts sent) and output (all generated content across subagents).
-   b. Calculate cost using the table above for the model you are running on.
+   a. Estimate tokens: total characters processed across the full loop / 4.
+      - Static input (AGENTS.md + architecture, loaded once per loop): likely cached after the first call.
+        Cache read = $0.30/MTok for Sonnet 4.x (cheap), $1.50/MTok for Opus 4 (deep).
+      - Variable input (spec + subagent prompts + conversation received): full input rate per model used.
+      - Output (all generated content across all subagents): full output rate per model used.
+      For a quick single-number estimate: apply the full base input rate to all input tokens (slight overestimate).
+   b. Calculate cost using the table above. If multiple models were used (Phase 0/1 vs Phase 2), estimate each separately and sum.
    c. Append a row to the `## Cost Log` section at the bottom of {spec_file}.
       If the section does not exist, add it:
       ## Cost Log
@@ -106,17 +126,41 @@ After all review layers pass:
    e. Use the GitHub MCP tool to add a comment to issue <issue-num>:
       "**Session cost (build-auto):** model `<model>` — ~<n> input tokens, ~<n> output tokens — est. **$<n>**
       _(approximation based on character count / 4; verify in API dashboard)_"
+10. Memory maintenance — keep cost-log lean:
+    Read _bmad-output/implementation-artifacts/cost-log.md. Count data rows (excluding header).
+    If row count > 20:
+    a. Sum the ~Cost USD column for all rows except the last 10.
+    b. Replace those older rows with one archive row:
+       | <first-date> → <last-archived-date> | (archived) | various | — | — | $<sum> |
+    c. Keep the last 10 data rows intact below the archive row.
+    d. Write the pruned file back.
 """
 
-# Two-phase TDD with automated gate — no human in the loop.
+# Three-phase TDD with automated gate — fully unattended.
+# Phase 0: file discovery using the cheap model (fast scan, no reasoning required).
+# Phase 1: test scaffolding using the cheap model (mechanical mirroring of ACs into test stubs).
+# Phase 2: implementation using the deep model (complex reasoning required).
+# Model tiers are defined in _bmad/custom/config.toml [models] section.
 implementation_handoff = """
-## TDD — Two Phases, Automated Gate
+## TDD — Three Phases, Automated Gate
 
-### PHASE 1 — Tests First
+### PHASE 0 — File Discovery (cheap model)
 
-Launch a subagent with no prior conversation context:
+Launch a subagent using the cheap model (read key `models.cheap` in `_bmad/custom/config.toml`) with no prior conversation context:
+
+> Read {spec_file}. Identify every source file that needs to be created or modified to satisfy the acceptance criteria.
+> Return a compact JSON array: [{"path": "src/...", "action": "create|modify", "serves_ac": "AC-1"}]
+> Do NOT implement anything. Read the spec and existing file structure only.
+
+Capture the file list from Phase 0. Use it to scope Phase 1 and Phase 2 subagents — they load only those specific files, not the full codebase.
+
+### PHASE 1 — Tests First (cheap model)
+
+Launch a subagent using the cheap model (read key `models.cheap` in `_bmad/custom/config.toml`) — test scaffolding is mechanical, it mirrors ACs into test stubs and does not require deep reasoning — with no prior conversation context:
 
 > Read {spec_file} fully. Your SOLE task is writing tests — write NO implementation code whatsoever.
+>
+> Relevant files identified by Phase 0: <insert Phase 0 file list here>
 >
 > For every acceptance criterion:
 > - Write test(s) using the project's existing test framework (pytest + anyio, see tests/ directory).
@@ -147,11 +191,12 @@ After receiving the Phase 1 report, verify autonomously:
    - Use the GitHub MCP tool to add the label "blocked" and remove "in-progress" from issue {num}.
    - HALT.
 
-### PHASE 2 — Implement to Green
+### PHASE 2 — Implement to Green (deep model)
 
-Launch a subagent with no prior conversation context:
+Launch a subagent using the deep model (read key `models.deep` in `_bmad/custom/config.toml`) with no prior conversation context:
 
-> Read {spec_file} fully — it is your sole source of truth. Load every file in its frontmatter `context:`.
+> Read {spec_file} fully — it is your sole source of truth.
+> Load the files identified in Phase 0 (or the spec's frontmatter `context:` if no Phase 0 list is available).
 >
 > Tests are already written and the gate passed. Write ONLY implementation code.
 > Do NOT modify, add, or delete any test file.
