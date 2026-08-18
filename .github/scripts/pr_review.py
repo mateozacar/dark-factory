@@ -3,12 +3,17 @@
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 
 import openai
 
 MAX_DIFF_CHARS = 60_000
+
+CODERABBIT_BOT = "coderabbitai[bot]"
+CR_POLL_TIMEOUT = 480
+CR_POLL_INTERVAL = 30
 
 SYSTEM_PROMPT = """\
 You are a senior code reviewer for Dark Factory — a stateless REST proxy for USGS \
@@ -36,6 +41,11 @@ inputs, error paths).
 must depend only on domain and ports (ABCs). Infrastructure must implement ports and \
 never be imported by application/domain. Flag any direct infrastructure imports in \
 application or domain.
+- Exception coverage: Flag async endpoints that call external HTTP services but only \
+catch httpx.HTTPStatusError without catching httpx.TransportError \
+(ConnectError/TimeoutException). Missing TransportError causes 500 instead of 502.
+- None-safe serialization: Flag GeoJSON coordinate construction like \
+[eq.longitude, eq.latitude, eq.depth] when source model fields can be None.
 
 Return ONLY a valid JSON object with this exact structure (no markdown fences, no extra text):
 {
@@ -215,6 +225,75 @@ def write_outputs(needs_fix: bool, issues: list) -> None:
         f.write(f"issues_json<<{delimiter}\n{issues_json}\n{delimiter}\n")
 
 
+def wait_for_coderabbit(repo: str, pr_number: str) -> bool:
+    """Poll for a CodeRabbit review every CR_POLL_INTERVAL seconds up to CR_POLL_TIMEOUT.
+
+    Returns True if a CodeRabbit review is found, False if timed out.
+    """
+    url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/reviews?per_page=100"
+    deadline = time.monotonic() + CR_POLL_TIMEOUT
+    while time.monotonic() < deadline:
+        status, body = _github_request(url)
+        if status == 200:
+            reviews = json.loads(body)
+            for review in reviews:
+                if review.get("user", {}).get("login") == CODERABBIT_BOT:
+                    print("CodeRabbit review found.")
+                    return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        sleep_secs = min(CR_POLL_INTERVAL, remaining)
+        print(f"CodeRabbit review not yet found, waiting {sleep_secs:.0f}s...")
+        time.sleep(sleep_secs)
+    print("Timed out waiting for CodeRabbit review.")
+    return False
+
+
+def fetch_coderabbit_inline_comments(repo: str, pr_number: str) -> list:
+    """Fetch inline PR comments from CodeRabbit.
+
+    Returns a list of dicts with keys: file, line, description.
+    """
+    url = (
+        f"https://api.github.com/repos/{repo}/pulls/{pr_number}/comments?per_page=100"
+    )
+    status, body = _github_request(url)
+    if status != 200:
+        print(f"Failed to fetch PR comments ({status})")
+        return []
+    comments = json.loads(body)
+    result = []
+    for comment in comments:
+        if comment.get("user", {}).get("login") != CODERABBIT_BOT:
+            continue
+        file_path = comment.get("path", "")
+        line = comment.get("line") or comment.get("original_line")
+        raw_body = comment.get("body", "")
+        description = f"[CodeRabbit] {raw_body}"[:400]
+        result.append({"file": file_path, "line": line, "description": description})
+    return result
+
+
+def post_cr_label_comment(repo: str, pr_number: str, cr_issues: list) -> None:
+    """Post an issue comment listing up to 10 CodeRabbit issues that will be auto-fixed."""
+    shown = cr_issues[:10]
+    lines = ["## 🐇 CodeRabbit Issues to Auto-Fix\n"]
+    for issue in shown:
+        file_ref = f"`{issue['file']}`" if issue.get("file") else "(unknown file)"
+        line_ref = f" line {issue['line']}" if issue.get("line") else ""
+        lines.append(f"- {file_ref}{line_ref}: {issue['description']}")
+    if len(cr_issues) > 10:
+        lines.append(f"\n_…and {len(cr_issues) - 10} more._")
+    comment_body = "\n".join(lines)
+    url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
+    status, _ = _github_request(url, method="POST", body={"body": comment_body})
+    if status in (200, 201):
+        print(f"CodeRabbit label comment posted ({len(shown)} issues listed).")
+    else:
+        print(f"Failed to post CodeRabbit label comment ({status})", file=sys.stderr)
+
+
 def main() -> None:
     repo = os.environ["REPO"]
     pr_number = os.environ["PR_NUMBER"]
@@ -250,12 +329,23 @@ def main() -> None:
         review_data["summary"] = truncation_notice + review_data.get("summary", "")
 
     issues = review_data.get("issues", [])
-    needs_fix = decision == "REQUEST_CHANGES" and len(issues) > 0
-
-    print(f"Decision: {decision} | Issues: {len(issues)} | Auto-fix: {needs_fix}")
 
     post_review(repo, pr_number, head_sha, review_data)
-    write_outputs(needs_fix=needs_fix, issues=issues)
+
+    cr_issues: list = []
+    cr_found = wait_for_coderabbit(repo, pr_number)
+    if cr_found:
+        cr_issues = fetch_coderabbit_inline_comments(repo, pr_number)
+        post_cr_label_comment(repo, pr_number, cr_issues)
+
+    all_issues = issues + cr_issues
+    needs_fix = (decision == "REQUEST_CHANGES" and len(issues) > 0) or len(cr_issues) > 0
+
+    print(
+        f"Decision: {decision} | Claude issues: {len(issues)}"
+        f" | CR issues: {len(cr_issues)} | Auto-fix: {needs_fix}"
+    )
+    write_outputs(needs_fix=needs_fix, issues=all_issues)
 
 
 if __name__ == "__main__":
