@@ -6,15 +6,24 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from dark_factory.application.earthquake.handlers import GetEarthquakesHandler
-from dark_factory.application.earthquake.queries import GetEarthquakes
+from dark_factory.application.earthquake.handlers import (
+    GetAftershocksHandler,
+    GetEarthquakesHandler,
+)
+from dark_factory.application.earthquake.queries import GetAftershocks, GetEarthquakes
+from dark_factory.domain.earthquake.exceptions import EarthquakeNotFound
 from dark_factory.domain.earthquake.repositories import EarthquakeRepository
 from dark_factory.domain.earthquake.value_objects import EarthquakeFilter
 from dark_factory.interface.http.dependencies import get_earthquake_repository
 from dark_factory.interface.http.v1.schemas import (
+    AftershockMainEvent,
+    AftershockResponse,
+    AftershockStats,
     EarthquakeFilterParams,
+    EarthquakeResponse,
     GeoJSONFeature,
     GeoJSONFeatureCollection,
     GeoJSONFeatureProperties,
@@ -91,3 +100,65 @@ async def recent_earthquakes() -> dict[str, str]:
 async def get_earthquake_by_id(earthquake_id: str) -> dict[str, str]:
     """Return a single earthquake by its USGS event ID. (stub)"""
     return {"status": "stub"}
+
+
+@router.get(
+    "/{earthquake_id}/aftershocks",
+    response_model=AftershockResponse,
+    summary="Get aftershock sequence for an earthquake",
+    description=(
+        "Retrieve and analyse the aftershock sequence for a given mainshock event."
+        " Returns sequence statistics and an assessment of whether the sequence"
+        " is decaying, active, or has insufficient data."
+    ),
+    responses={
+        404: {"description": "Earthquake event not found."},
+        422: {"description": "Validation error (e.g. days out of range)."},
+        502: {"description": "USGS upstream unavailable or returned an error."},
+    },
+)
+async def get_aftershocks(
+    earthquake_id: str,
+    repo: Annotated[EarthquakeRepository, Depends(get_earthquake_repository)],
+    days: Annotated[int, Query(ge=1, le=90)] = 30,
+) -> AftershockResponse:
+    """Return the aftershock sequence and statistics for a mainshock event."""
+    query = GetAftershocks(earthquake_id=earthquake_id, days=days)
+    handler = GetAftershocksHandler(repository=repo)
+    try:
+        result = await handler.handle(query)
+    except EarthquakeNotFound:
+        raise HTTPException(status_code=404, detail="Earthquake not found")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"USGS upstream error: {exc.response.status_code}",
+        )
+    main = result.main_event
+    return AftershockResponse(
+        main_event=AftershockMainEvent(
+            id=main.id,
+            magnitude=main.magnitude,
+            depth=main.depth,
+            latitude=main.latitude,
+            longitude=main.longitude,
+            time=main.time,
+        ),
+        aftershocks=[
+            EarthquakeResponse(
+                id=eq.id,
+                magnitude=eq.magnitude,
+                depth=eq.depth,
+                latitude=eq.latitude,
+                longitude=eq.longitude,
+            )
+            for eq in result.aftershocks
+        ],
+        stats=AftershockStats(
+            count=result.count,
+            max_magnitude=result.max_magnitude,
+            avg_magnitude=result.avg_magnitude,
+            largest_aftershock_id=result.largest_aftershock_id,
+        ),
+        sequence_assessment=result.sequence_assessment,
+    )

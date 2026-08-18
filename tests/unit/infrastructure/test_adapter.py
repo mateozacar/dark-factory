@@ -343,3 +343,156 @@ class TestUSGSAdapterGetAll:
         assert params.get("starttime") == "2026-08-06"
         assert params.get("endtime") == "2026-08-13"
         assert float(params["minmagnitude"]) == 4.0
+
+    @pytest.mark.anyio
+    async def test_get_all_forwards_spatial_and_maxmagnitude_params(self) -> None:
+        """
+        Given: an EarthquakeFilter with latitude, longitude, max_radius_km, max_magnitude set
+        When:  USGSAdapter.get_all(filters) is awaited
+        Then:  the outbound request includes latitude, longitude, maxradiuskm, maxmagnitude
+
+        I/O Matrix row: spatial/magnitude filter params forwarded to USGS
+        """
+        import httpx
+        from dark_factory.domain.earthquake.value_objects import EarthquakeFilter
+        from dark_factory.infrastructure.usgs.adapter import USGSAdapter
+
+        fixture = _load_fixture()
+        captured_requests: list[httpx.Request] = []
+
+        def mock_handler(request: httpx.Request) -> httpx.Response:
+            captured_requests.append(request)
+            return httpx.Response(200, json=fixture)
+
+        transport = httpx.MockTransport(handler=mock_handler)
+        client = httpx.AsyncClient(
+            transport=transport,
+            base_url="https://earthquake.usgs.gov/fdsnws/event/1/query",
+        )
+
+        spatial_filter = EarthquakeFilter(
+            start_time="2026-08-06",
+            end_time="2026-08-13",
+            min_magnitude=2.5,
+            max_magnitude=5.9,
+            latitude=37.5,
+            longitude=-122.1,
+            max_radius_km=25.0,
+        )
+        adapter = USGSAdapter(client=client)
+        await adapter.get_all(spatial_filter)
+
+        params = dict(captured_requests[0].url.params)
+        assert float(params["latitude"]) == 37.5
+        assert float(params["longitude"]) == -122.1
+        assert float(params["maxradiuskm"]) == 25.0
+        assert float(params["maxmagnitude"]) == 5.9
+
+
+class TestUSGSAdapterGetById:
+    """
+    Given: a USGSAdapter wired with a MockTransport
+    When:  get_by_id(event_id) is awaited
+    Then:  the outbound request carries eventid and format=geojson params,
+           the returned Earthquake has correct fields, and None is returned
+           when features list is empty.
+    """
+
+    @pytest.mark.anyio
+    async def test_get_by_id_sends_eventid_and_format_params(self) -> None:
+        """
+        Given: a mock transport that captures the outbound request
+        When:  USGSAdapter.get_by_id("us7000abc1") is awaited
+        Then:  the request URL contains eventid=us7000abc1 and format=geojson
+        """
+        import httpx
+        from dark_factory.infrastructure.usgs.adapter import USGSAdapter
+
+        single_feature_response = {
+            "type": "FeatureCollection",
+            "features": [_load_fixture()["features"][0]],
+            "metadata": {"count": 1},
+        }
+        captured_requests: list[httpx.Request] = []
+
+        def mock_handler(request: httpx.Request) -> httpx.Response:
+            captured_requests.append(request)
+            return httpx.Response(200, json=single_feature_response)
+
+        transport = httpx.MockTransport(handler=mock_handler)
+        client = httpx.AsyncClient(
+            transport=transport,
+            base_url="https://earthquake.usgs.gov/fdsnws/event/1/query",
+        )
+
+        adapter = USGSAdapter(client=client)
+        await adapter.get_by_id("us7000abc1")
+
+        assert len(captured_requests) == 1
+        params = dict(captured_requests[0].url.params)
+        assert params.get("eventid") == "us7000abc1"
+        assert params.get("format") == "geojson"
+
+    @pytest.mark.anyio
+    async def test_get_by_id_returns_earthquake_entity_with_correct_fields(self) -> None:
+        """
+        Given: a mock transport returning a single-feature GeoJSON with
+               id="us7000abc1", mag=5.2, coordinates=[-122.1, 37.5, 10.0], time=1754956800000
+        When:  USGSAdapter.get_by_id("us7000abc1") is awaited
+        Then:  the returned Earthquake has id="us7000abc1", magnitude=5.2,
+               depth=10.0, latitude=37.5, longitude=-122.1
+        """
+        import httpx
+        from dark_factory.domain.earthquake.entities import Earthquake
+        from dark_factory.infrastructure.usgs.adapter import USGSAdapter
+
+        single_feature_response = {
+            "type": "FeatureCollection",
+            "features": [_load_fixture()["features"][0]],
+            "metadata": {"count": 1},
+        }
+
+        def mock_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=single_feature_response)
+
+        transport = httpx.MockTransport(handler=mock_handler)
+        client = httpx.AsyncClient(
+            transport=transport,
+            base_url="https://earthquake.usgs.gov/fdsnws/event/1/query",
+        )
+
+        adapter = USGSAdapter(client=client)
+        result = await adapter.get_by_id("us7000abc1")
+
+        assert isinstance(result, Earthquake)
+        assert result.id == "us7000abc1"
+        assert result.magnitude == 5.2
+        assert result.depth == 10.0
+        assert result.latitude == 37.5
+        assert result.longitude == -122.1
+
+    @pytest.mark.anyio
+    async def test_get_by_id_returns_none_when_features_empty(self) -> None:
+        """
+        Given: a mock transport returning an empty features list
+        When:  USGSAdapter.get_by_id("unknown-id") is awaited
+        Then:  the result is None
+        """
+        import httpx
+        from dark_factory.infrastructure.usgs.adapter import USGSAdapter
+
+        empty_response = {"type": "FeatureCollection", "features": [], "metadata": {"count": 0}}
+
+        def mock_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=empty_response)
+
+        transport = httpx.MockTransport(handler=mock_handler)
+        client = httpx.AsyncClient(
+            transport=transport,
+            base_url="https://earthquake.usgs.gov/fdsnws/event/1/query",
+        )
+
+        adapter = USGSAdapter(client=client)
+        result = await adapter.get_by_id("unknown-id-9999")
+
+        assert result is None

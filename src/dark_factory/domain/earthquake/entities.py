@@ -18,3 +18,17 @@ class Earthquake:
     depth: float
     latitude: float
     longitude: float
+    time: str = ""
+
+
+@dataclass
+class AftershockResult:
+    """Result of an aftershock sequence analysis for a given main event."""
+
+    main_event: Earthquake
+    aftershocks: list[Earthquake]
+    count: int
+    max_magnitude: float | None
+    avg_magnitude: float | None
+    largest_aftershock_id: str | None
+    sequence_assessment: str

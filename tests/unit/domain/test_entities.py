@@ -58,14 +58,54 @@ class TestEarthquakeEntity:
         """
         Given: Earthquake is defined using @dataclasses.dataclass
         When:  dataclasses.fields() is called on it
-        Then:  the five required field names are present
+        Then:  the six required field names are present (including time)
         """
         import dataclasses
 
         from dark_factory.domain.earthquake.entities import Earthquake
 
         field_names = {f.name for f in dataclasses.fields(Earthquake)}
-        assert field_names == {"id", "magnitude", "depth", "latitude", "longitude"}
+        assert field_names == {"id", "magnitude", "depth", "latitude", "longitude", "time"}
+
+    def test_earthquake_time_field_defaults_to_empty_string(self) -> None:
+        """
+        Given: Earthquake is constructed without a time argument
+        When:  eq.time is accessed
+        Then:  its value is "" (empty string default)
+        """
+        from dark_factory.domain.earthquake.entities import Earthquake
+
+        eq = Earthquake(
+            id="us7000abc1",
+            magnitude=5.2,
+            depth=10.0,
+            latitude=37.5,
+            longitude=-122.1,
+        )
+        assert eq.time == ""
+
+    def test_aftershock_result_is_importable(self) -> None:
+        """
+        Given: entities.py is implemented with AftershockResult
+        When:  AftershockResult is imported
+        Then:  it is importable without error and is a dataclass
+        """
+        import dataclasses
+
+        from dark_factory.domain.earthquake.entities import AftershockResult  # noqa: F401
+
+        assert dataclasses.is_dataclass(AftershockResult)
+
+    def test_earthquake_not_found_exception_carries_event_id(self) -> None:
+        """
+        Given: EarthquakeNotFound is defined with an event_id attribute
+        When:  EarthquakeNotFound("us7000abc1") is raised and caught
+        Then:  the exception's event_id attribute equals "us7000abc1"
+        """
+        from dark_factory.domain.earthquake.exceptions import EarthquakeNotFound
+
+        exc = EarthquakeNotFound("us7000abc1")
+        assert exc.event_id == "us7000abc1"
 
     def test_earthquake_domain_module_has_no_external_imports(self) -> None:
         """

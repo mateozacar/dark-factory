@@ -25,3 +25,11 @@ class GetEarthquakeById:
     """Query: retrieve a single earthquake by its USGS event ID."""
 
     id: str
+
+
+@dataclass
+class GetAftershocks:
+    """Query: retrieve the aftershock sequence for a given mainshock event."""
+
+    earthquake_id: str
+    days: int = 30

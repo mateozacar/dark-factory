@@ -59,6 +59,35 @@ class GeoJSONFeature(BaseModel):
     properties: GeoJSONFeatureProperties
 
 
+class AftershockMainEvent(BaseModel):
+    """Wire-format representation of the main event in an aftershock response."""
+
+    id: str
+    magnitude: float
+    depth: float
+    latitude: float
+    longitude: float
+    time: str
+
+
+class AftershockStats(BaseModel):
+    """Statistics computed over the aftershock sequence."""
+
+    count: int
+    max_magnitude: float | None
+    avg_magnitude: float | None
+    largest_aftershock_id: str | None
+
+
+class AftershockResponse(BaseModel):
+    """Wire-format response for the GET /{earthquake_id}/aftershocks endpoint."""
+
+    main_event: AftershockMainEvent
+    aftershocks: list[EarthquakeResponse]
+    stats: AftershockStats
+    sequence_assessment: str
+
+
 class GeoJSONFeatureCollection(BaseModel):
     """GeoJSON FeatureCollection wrapping a list of earthquake features."""
 

@@ -4,6 +4,8 @@ Infrastructure — mapper: USGS GeoJSON → Earthquake domain entity.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from dark_factory.domain.earthquake.entities import Earthquake
 
 
@@ -34,10 +36,19 @@ class USGSMapper:
         longitude = float(coordinates[0])
         latitude = float(coordinates[1])
         depth = float(coordinates[2])
+        time_ms = properties.get("time")
+        time_str = (
+            datetime.fromtimestamp(int(time_ms) / 1000, tz=UTC).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            if time_ms is not None
+            else ""
+        )
         return Earthquake(
             id=earthquake_id,
             magnitude=magnitude,
             depth=depth,
             latitude=latitude,
             longitude=longitude,
+            time=time_str,
         )

@@ -30,6 +30,10 @@ class USGSAdapter(EarthquakeRepository):
             starttime=filters.start_time or "",
             endtime=filters.end_time or "",
             minmagnitude=filters.min_magnitude or 0.0,
+            latitude=filters.latitude,
+            longitude=filters.longitude,
+            maxradiuskm=filters.max_radius_km,
+            maxmagnitude=filters.max_magnitude,
         )
         features = raw.get("features", [])
         if not isinstance(features, list):
@@ -39,4 +43,9 @@ class USGSAdapter(EarthquakeRepository):
         return [USGSMapper.feature_to_earthquake(f) for f in features]
 
     async def get_by_id(self, earthquake_id: str) -> Earthquake | None:
-        raise NotImplementedError("stub — implement in the infrastructure story")
+        """Fetch a single earthquake by its USGS event ID."""
+        usgs_client = USGSClient(base_url="", client=self._client)
+        feature = await usgs_client.fetch_earthquake_by_id(earthquake_id)
+        if feature is None:
+            return None
+        return USGSMapper.feature_to_earthquake(feature)
