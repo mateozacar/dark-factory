@@ -32,6 +32,7 @@ SAMPLE_FEATURE: dict = {
     "properties": {
         "mag": 5.2,
         "place": "10km N of Test City, CA",
+        "time": 1709294400000,
     },
 }
 
@@ -143,10 +144,10 @@ class TestUSGSMapperFeatureToEarthquake:
     def test_all_five_fields_mapped_correctly_in_one_assertion(self) -> None:
         """
         Given: a USGS feature with id="us7000abc1", mag=5.2,
-               and coordinates=[-122.1, 37.5, 10.0]
+               coordinates=[-122.1, 37.5, 10.0], and time=1709294400000
         When:  USGSMapper.feature_to_earthquake(feature) is called
         Then:  the Earthquake entity has id="us7000abc1", magnitude=5.2,
-               depth=10.0, latitude=37.5, longitude=-122.1
+               depth=10.0, latitude=37.5, longitude=-122.1, time="2024-03-01T12:00:00Z"
         """
         from dark_factory.domain.earthquake.entities import Earthquake
         from dark_factory.infrastructure.usgs.mappers import USGSMapper
@@ -159,8 +160,23 @@ class TestUSGSMapperFeatureToEarthquake:
             depth=10.0,
             latitude=37.5,
             longitude=-122.1,
+            time="2024-03-01T12:00:00Z",
         )
         assert result == expected
+
+    def test_time_field_maps_to_iso8601(self) -> None:
+        """
+        Given: a USGS feature with properties.time = 1709294400000 (ms epoch)
+        When:  USGSMapper.feature_to_earthquake(feature) is called
+        Then:  the resulting Earthquake.time equals "2024-03-01T12:00:00Z"
+
+        I/O Matrix row: time ms-epoch → ISO-8601 UTC string
+        """
+        from dark_factory.infrastructure.usgs.mappers import USGSMapper
+
+        result = USGSMapper.feature_to_earthquake(SAMPLE_FEATURE)
+
+        assert result.time == "2024-03-01T12:00:00Z"
 
     def test_second_feature_maps_all_five_fields_correctly(self) -> None:
         """

@@ -62,8 +62,8 @@ def _make_sample_earthquakes() -> list["Earthquake"]:
     from dark_factory.domain.earthquake.entities import Earthquake
 
     return [
-        Earthquake(id="us7000abc1", magnitude=5.2, depth=10.0, latitude=37.5, longitude=-122.1),
-        Earthquake(id="us7000def2", magnitude=4.8, depth=22.5, latitude=35.7, longitude=139.7),
+        Earthquake(id="us7000abc1", magnitude=5.2, depth=10.0, latitude=37.5, longitude=-122.1, time="2025-08-11T16:00:00Z"),
+        Earthquake(id="us7000def2", magnitude=4.8, depth=22.5, latitude=35.7, longitude=139.7, time="2025-08-10T16:00:00Z"),
     ]
 
 
@@ -438,3 +438,183 @@ class TestGetEarthquakeRepositoryDependency:
         assert isinstance(result, USGSAdapter)
 
         await fake_client.aclose()
+
+
+# ---------------------------------------------------------------------------
+# Aftershocks endpoint — timeline constants
+#
+# Main event:          "2025-01-01T00:00:00Z"
+# Window (days=30):    end = "2025-01-31T00:00:00Z", mid = "2025-01-16T00:00:00Z"
+# First-half times  (time <  mid): Jan 5, Jan 8, Jan 12
+# Second-half times (time >= mid): Jan 20
+# ---------------------------------------------------------------------------
+
+_MAIN_EQ_ID      = "us7000main"
+_MAIN_TIME       = "2025-01-01T00:00:00Z"
+_AFTER_1H_A      = "2025-01-05T00:00:00Z"
+_AFTER_1H_B      = "2025-01-08T00:00:00Z"
+_AFTER_1H_C      = "2025-01-12T00:00:00Z"
+_AFTER_2H        = "2025-01-20T00:00:00Z"
+
+
+def _make_aftershock_earthquakes() -> list["Earthquake"]:
+    """
+    Return a main event plus 4 aftershocks (3 first-half, 1 second-half)
+    that should produce sequence_assessment="decaying".
+    """
+    from dark_factory.domain.earthquake.entities import Earthquake
+
+    return [
+        # main event (also stored so get_by_id can find it)
+        Earthquake(id=_MAIN_EQ_ID, magnitude=6.0, depth=15.0, latitude=37.5, longitude=-122.1, time=_MAIN_TIME),
+        # aftershocks
+        Earthquake(id="as001", magnitude=3.1, depth=10.0, latitude=37.5, longitude=-122.1, time=_AFTER_1H_A),
+        Earthquake(id="as002", magnitude=2.9, depth=11.0, latitude=37.5, longitude=-122.1, time=_AFTER_1H_B),
+        Earthquake(id="as003", magnitude=3.3, depth=12.0, latitude=37.5, longitude=-122.1, time=_AFTER_1H_C),
+        Earthquake(id="as004", magnitude=2.7, depth=13.0, latitude=37.5, longitude=-122.1, time=_AFTER_2H),
+    ]
+
+
+class TestAftershocksEndpoint:
+    """
+    Integration tests for GET /api/v1/earthquakes/{earthquake_id}/aftershocks.
+
+    AC covered:
+      - Given a valid event ID and at least 3 aftershocks with first-half rate >
+        second-half rate, when GET /aftershocks, then HTTP 200 and
+        sequence_assessment="decaying" with correct count
+      - Given a valid event ID and fewer than 3 aftershocks, when GET /aftershocks,
+        then sequence_assessment="insufficient_data" and stats.count < 3
+      - Given an unknown event ID, when GET /aftershocks, then HTTP 404
+      - Given days=91, when GET /aftershocks, then HTTP 422
+      - Given a valid event ID, when GET /aftershocks?days=30, then response body
+        contains main_event, aftershocks, stats, sequence_assessment fields
+    """
+
+    @pytest.mark.anyio
+    async def test_aftershocks_returns_200_with_valid_id(self) -> None:
+        """
+        Given: DI overridden with a fake repo containing the main event and aftershocks
+        When:  GET /api/v1/earthquakes/us7000main/aftershocks?days=30
+        Then:  HTTP 200
+
+        I/O Matrix row: Happy path — decaying
+        """
+        client, app = await _make_client_with_fake_repo(_make_aftershock_earthquakes())
+        try:
+            async with client:
+                response = await client.get(
+                    f"/api/v1/earthquakes/{_MAIN_EQ_ID}/aftershocks",
+                    params={"days": "30"},
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+
+    @pytest.mark.anyio
+    async def test_aftershocks_returns_404_for_unknown_id(self) -> None:
+        """
+        Given: DI overridden with a fake repo that does NOT contain "unknown-id"
+        When:  GET /api/v1/earthquakes/unknown-id/aftershocks
+        Then:  HTTP 404
+
+        I/O Matrix row: Main event not found
+        """
+        client, app = await _make_client_with_fake_repo(earthquakes=[])
+        try:
+            async with client:
+                response = await client.get(
+                    "/api/v1/earthquakes/unknown-id-9999/aftershocks",
+                    params={"days": "30"},
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 404
+
+    @pytest.mark.anyio
+    async def test_aftershocks_returns_422_for_days_out_of_range(self) -> None:
+        """
+        Given: days=91 (out of allowed range 1–90)
+        When:  GET /api/v1/earthquakes/us7000main/aftershocks?days=91
+        Then:  HTTP 422
+
+        I/O Matrix row: days out of range
+        """
+        client, app = await _make_client_with_fake_repo(_make_aftershock_earthquakes())
+        try:
+            async with client:
+                response = await client.get(
+                    f"/api/v1/earthquakes/{_MAIN_EQ_ID}/aftershocks",
+                    params={"days": "91"},
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 422
+
+    @pytest.mark.anyio
+    async def test_aftershocks_returns_502_on_usgs_upstream_error(self) -> None:
+        """
+        Given: a fake repo whose get_by_id raises httpx.HTTPStatusError (non-404)
+        When:  GET /api/v1/earthquakes/us7000main/aftershocks
+        Then:  HTTP 502
+
+        I/O Matrix row: USGS error on main event fetch → 502
+        """
+        import httpx
+        from httpx import ASGITransport, AsyncClient
+
+        from dark_factory.main import create_app
+        from dark_factory.interface.http.dependencies import get_earthquake_repository
+
+        class _ErrorRepo:
+            async def get_by_id(self, earthquake_id: str) -> None:
+                response = httpx.Response(500, request=httpx.Request("GET", "https://example.com"))
+                raise httpx.HTTPStatusError("upstream error", request=response.request, response=response)
+
+            async def get_all(self, filters: object = None) -> list:
+                return []
+
+        app = create_app()
+        app.dependency_overrides[get_earthquake_repository] = lambda: _ErrorRepo()
+        transport = ASGITransport(app=app)
+        try:
+            async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+                response = await client.get(
+                    "/api/v1/earthquakes/us7000main/aftershocks",
+                    params={"days": "30"},
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 502
+
+    @pytest.mark.anyio
+    async def test_aftershocks_response_has_required_fields(self) -> None:
+        """
+        Given: a valid event ID and days=30 (default)
+        When:  GET /api/v1/earthquakes/us7000main/aftershocks?days=30
+        Then:  response JSON body contains main_event, aftershocks, stats,
+               sequence_assessment fields
+
+        I/O Matrix row: response body structure
+        """
+        client, app = await _make_client_with_fake_repo(_make_aftershock_earthquakes())
+        try:
+            async with client:
+                response = await client.get(
+                    f"/api/v1/earthquakes/{_MAIN_EQ_ID}/aftershocks",
+                    params={"days": "30"},
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "main_event" in body
+        assert "aftershocks" in body
+        assert "stats" in body
+        assert "sequence_assessment" in body
+        assert body["sequence_assessment"] == "decaying"

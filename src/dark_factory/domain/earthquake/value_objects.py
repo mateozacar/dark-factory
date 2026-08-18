@@ -49,3 +49,6 @@ class EarthquakeFilter:
     start_time: str | None = None
     end_time: str | None = None
     limit: int | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    max_radius_km: float | None = None
