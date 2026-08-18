@@ -20,6 +20,23 @@ Strict architecture rules:
 - infrastructure implements domain ports; it is NEVER imported by application or domain
 - EarthquakeFilter lives in value_objects.py; filters.py is a re-export shim only
 
+Development best practices to enforce:
+- TELL DON'T ASK: Objects should make decisions themselves. Flag code that queries an \
+object's state to make an external decision (e.g., `if obj.status == X: obj.do()`) — \
+this should instead be `obj.activate()`. Getters that expose internal state for \
+decision-making are violations.
+- Clean Code: Flag God objects (classes doing too much), meaningless names, functions \
+longer than 20–30 lines with multiple responsibilities, comments that explain WHAT the \
+code does instead of WHY, magic numbers/strings without named constants.
+- TDD and test quality: Flag tests without Given/When/Then structure. Flag tests that \
+mock internals or implementation details rather than testing observable behaviour. Flag \
+tests without descriptive names. Flag test files missing edge-case coverage (None/empty \
+inputs, error paths).
+- Hexagonal Architecture compliance: Domain layer must be stdlib-only. Application layer \
+must depend only on domain and ports (ABCs). Infrastructure must implement ports and \
+never be imported by application/domain. Flag any direct infrastructure imports in \
+application or domain.
+
 Return ONLY a valid JSON object with this exact structure (no markdown fences, no extra text):
 {
   "decision": "APPROVE" | "REQUEST_CHANGES",
@@ -33,7 +50,8 @@ Return ONLY a valid JSON object with this exact structure (no markdown fences, n
 }
 
 Rules:
-- Use REQUEST_CHANGES only for real bugs, architecture violations, or security issues.
+- Use REQUEST_CHANGES for real bugs, architecture violations, security issues, severe \
+TDA violations, clean code smells, or TDD anti-patterns.
   Style nits and suggestions warrant APPROVE with comments.
 - issues[] must list every item that justifies REQUEST_CHANGES. Empty list if APPROVE.
 - inline_comments[] must only reference line numbers that appear as added lines (+) in \
@@ -56,6 +74,9 @@ the summary instead.
 
 ### Architecture Alignment
 [✅/⚠️ bullets for each rule relevant to this diff]
+
+### CI Checks
+[✅/❌ result table from CI_SUMMARY, or "CI checks were not run." if empty]
 
 ---
 *gpt-4o · Dark Factory PR Review*
@@ -113,8 +134,11 @@ def read_agents_md() -> str:
         return ""
 
 
-def call_openai(pr_title: str, pr_body: str, diff: str, context: str) -> dict:
+def call_openai(
+    pr_title: str, pr_body: str, diff: str, context: str, ci_summary: str
+) -> dict:
     client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    ci_section = f"\n\n**CI Check Results:**\n{ci_summary}" if ci_summary else ""
     user_message = f"""\
 Review this pull request.
 
@@ -123,7 +147,7 @@ Review this pull request.
 
 **Project Context (AGENTS.md):**
 {context}
-
+{ci_section}
 **Diff:**
 ```diff
 {diff}
@@ -164,7 +188,8 @@ def post_review(
     payload.pop("comments")
     status, body = _github_request(url, method="POST", body=payload)
     if status in (200, 201):
-        print(f"Review posted without inline comments (id={json.loads(body).get('id')})")
+        review_id = json.loads(body).get("id")
+        print(f"Review posted without inline comments (id={review_id})")
         return
 
     # Final fallback: plain issue comment
@@ -186,7 +211,6 @@ def write_outputs(needs_fix: bool, issues: list) -> None:
     issues_json = json.dumps(issues)
     with open(output_file, "a") as f:
         f.write(f"needs_fix={'true' if needs_fix else 'false'}\n")
-        # Multiline value using heredoc syntax
         delimiter = "EOF_ISSUES"
         f.write(f"issues_json<<{delimiter}\n{issues_json}\n{delimiter}\n")
 
@@ -197,6 +221,7 @@ def main() -> None:
     pr_title = os.environ["PR_TITLE"]
     pr_body = os.environ.get("PR_BODY", "")
     head_sha = os.environ["HEAD_SHA"]
+    ci_summary = os.environ.get("CI_SUMMARY", "")
 
     print(f"Reviewing PR #{pr_number}: {pr_title}")
 
@@ -207,12 +232,10 @@ def main() -> None:
         return
 
     context = read_agents_md()
-    review_data = call_openai(pr_title, pr_body, diff, context)
+    review_data = call_openai(pr_title, pr_body, diff, context, ci_summary)
 
     decision = review_data.get("decision", "COMMENT")
 
-    # A truncated diff means later files were never analysed.  Downgrade any
-    # APPROVE to COMMENT so a human must sign off on the unreviewed portion.
     if is_truncated and decision == "APPROVE":
         print(
             "Diff was truncated — downgrading APPROVE to COMMENT;"

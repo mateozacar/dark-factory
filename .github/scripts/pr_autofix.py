@@ -56,7 +56,6 @@ Return the complete fixed file content only."""
     if fixed.startswith("```"):
         lines = fixed.splitlines()
         end = -1 if lines[-1].strip() == "```" else len(lines)
-        # Skip first line (```python or ```)
         fixed = "\n".join(lines[1:end])
     return fixed
 
@@ -167,7 +166,7 @@ def main() -> None:
         with open(file_path, "w") as f:
             f.write(fixed)
         fixed_files.append(file_path)
-        print(f"  Fixed.")
+        print("  Fixed.")
 
     if not fixed_files:
         print("No files were changed — nothing to commit.")
@@ -180,7 +179,9 @@ def main() -> None:
         f"- {i.get('file','?')}:{i.get('line','?')} {i['description']}"
         for i in all_issues
     )
-    commit_msg = f"[ai-fix] resolve review findings (PR #{pr_number})\n\n{issue_summary}"
+    commit_msg = (
+        f"[ai-fix] resolve review findings (PR #{pr_number})\n\n{issue_summary}"
+    )
 
     result = run(["git", "commit", "-m", commit_msg], check=False)
     if result.returncode != 0:
@@ -193,7 +194,9 @@ def main() -> None:
         print(f"git push failed:\n{result.stderr}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Pushed auto-fix commit to {pr_branch} ({len(fixed_files)} file(s) changed).")
+    print(
+        f"Pushed auto-fix commit to {pr_branch} ({len(fixed_files)} file(s) changed)."
+    )
 
 
 if __name__ == "__main__":
