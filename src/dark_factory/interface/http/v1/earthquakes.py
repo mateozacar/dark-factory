@@ -64,7 +64,7 @@ async def list_earthquakes(
             type="Feature",
             geometry=GeoJSONGeometry(
                 type="Point",
-                coordinates=[eq.longitude, eq.latitude, eq.depth],
+                coordinates=[eq.longitude or 0.0, eq.latitude or 0.0, eq.depth or 0.0],
             ),
             properties=GeoJSONFeatureProperties(id=eq.id, mag=eq.magnitude),
         )
@@ -101,17 +101,17 @@ async def recent_earthquakes(
     try:
         handler = GetEarthquakesHandler(repository=repo)
         earthquakes = await handler.handle(GetEarthquakes(filters=earthquake_filter))
-    except httpx.HTTPStatusError as exc:
+    except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.ConnectError) as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"USGS upstream error: {exc.response.status_code}",
+            detail=f"USGS upstream error: {str(exc)}",
         )
     features = [
         GeoJSONFeature(
             type="Feature",
             geometry=GeoJSONGeometry(
                 type="Point",
-                coordinates=[eq.longitude, eq.latitude, eq.depth],
+                coordinates=[eq.longitude or 0.0, eq.latitude or 0.0, eq.depth or 0.0],
             ),
             properties=GeoJSONFeatureProperties(id=eq.id, mag=eq.magnitude),
         )
@@ -160,10 +160,10 @@ async def get_aftershocks(
         result = await handler.handle(query)
     except EarthquakeNotFound:
         raise HTTPException(status_code=404, detail="Earthquake not found")
-    except httpx.HTTPStatusError as exc:
+    except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.ConnectError) as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"USGS upstream error: {exc.response.status_code}",
+            detail=f"USGS upstream error: {str(exc)}",
         )
     main = result.main_event
     return AftershockResponse(
