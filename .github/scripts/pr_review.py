@@ -3,8 +3,8 @@
 import json
 import os
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
 
 import openai
 
@@ -87,7 +87,8 @@ def _github_request(
         return e.code, e.read().decode()
 
 
-def fetch_diff(repo: str, pr_number: str) -> str:
+def fetch_diff(repo: str, pr_number: str) -> tuple[str, bool]:
+    """Return (diff_text, is_truncated). Truncated diffs must not be auto-approved."""
     url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}"
     token = os.environ["GITHUB_TOKEN"]
     headers = {
@@ -99,8 +100,9 @@ def fetch_diff(repo: str, pr_number: str) -> str:
     with urllib.request.urlopen(req) as resp:
         diff = resp.read().decode()
     if len(diff) > MAX_DIFF_CHARS:
-        diff = diff[:MAX_DIFF_CHARS] + "\n\n... [diff truncated — first 60k chars shown]"
-    return diff
+        suffix = "\n\n... [diff truncated — first 60k chars shown]"
+        return diff[:MAX_DIFF_CHARS] + suffix, True
+    return diff, False
 
 
 def read_agents_md() -> str:
@@ -198,7 +200,7 @@ def main() -> None:
 
     print(f"Reviewing PR #{pr_number}: {pr_title}")
 
-    diff = fetch_diff(repo, pr_number)
+    diff, is_truncated = fetch_diff(repo, pr_number)
     if not diff.strip():
         print("Empty diff — skipping review.")
         write_outputs(needs_fix=False, issues=[])
@@ -208,6 +210,22 @@ def main() -> None:
     review_data = call_openai(pr_title, pr_body, diff, context)
 
     decision = review_data.get("decision", "COMMENT")
+
+    # A truncated diff means later files were never analysed.  Downgrade any
+    # APPROVE to COMMENT so a human must sign off on the unreviewed portion.
+    if is_truncated and decision == "APPROVE":
+        print(
+            "Diff was truncated — downgrading APPROVE to COMMENT;"
+            " human review required."
+        )
+        review_data["decision"] = "COMMENT"
+        decision = "COMMENT"
+        truncation_notice = (
+            "> ⚠️ **Diff truncated** — only the first 60 k characters were analysed."
+            " Human review is required before approving.\n\n"
+        )
+        review_data["summary"] = truncation_notice + review_data.get("summary", "")
+
     issues = review_data.get("issues", [])
     needs_fix = decision == "REQUEST_CHANGES" and len(issues) > 0
 

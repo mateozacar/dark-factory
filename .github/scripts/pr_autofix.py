@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from collections import defaultdict
 
 import openai
@@ -59,6 +61,45 @@ Return the complete fixed file content only."""
     return fixed
 
 
+def fetch_pr_changed_files(repo: str, pr_number: str) -> set[str]:
+    """Return the set of relative file paths changed in the PR (from GitHub API)."""
+    token = os.environ.get("GITHUB_TOKEN", "")
+    url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/files?per_page=100"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read().decode())
+        return {f["filename"] for f in data}
+    except Exception as e:  # noqa: BLE001
+        print(f"Warning: could not fetch PR file list: {e}", file=sys.stderr)
+        return set()
+
+
+def is_safe_path(file_path: str, workspace: str, allowlist: set[str]) -> bool:
+    """Return True only when file_path is in the PR allowlist and safe to write."""
+    if os.path.isabs(file_path):
+        return False
+    parts = file_path.replace("\\", "/").split("/")
+    if ".." in parts or "" in parts[:-1]:
+        return False
+    if parts[0] == ".git":
+        return False
+    if file_path not in allowlist:
+        return False
+    full = os.path.join(workspace, file_path)
+    canonical = os.path.realpath(full)
+    if not canonical.startswith(workspace + os.sep) and canonical != workspace:
+        return False
+    if os.path.islink(full):
+        return False
+    return True
+
+
 def run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, check=check)
 
@@ -67,6 +108,8 @@ def main() -> None:
     issues_raw = os.environ.get("ISSUES_JSON", "[]")
     pr_branch = os.environ["PR_BRANCH"]
     pr_number = os.environ.get("PR_NUMBER", "?")
+    repo = os.environ.get("REPO", "")
+    workspace = os.path.realpath(os.getcwd())
 
     try:
         all_issues: list[dict] = json.loads(issues_raw)
@@ -76,6 +119,15 @@ def main() -> None:
 
     if not all_issues:
         print("No issues to fix.")
+        sys.exit(0)
+
+    # Build trusted allowlist from the GitHub PR changed-file list
+    changed_files = fetch_pr_changed_files(repo, str(pr_number))
+    if not changed_files:
+        print(
+            "Could not retrieve PR changed-file list — skipping auto-fix (safety).",
+            file=sys.stderr,
+        )
         sys.exit(0)
 
     # Group issues by file
@@ -88,6 +140,12 @@ def main() -> None:
     fixed_files: list[str] = []
 
     for file_path, issues in by_file.items():
+        if not is_safe_path(file_path, workspace, changed_files):
+            print(
+                f"Skipping {file_path!r} — not in PR allowlist or unsafe path.",
+                file=sys.stderr,
+            )
+            continue
         if not os.path.isfile(file_path):
             print(f"Skipping {file_path} — not found on disk.")
             continue

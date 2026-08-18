@@ -8,10 +8,8 @@ on:
 jobs:
   review:
     name: Claude Code Review
-    # Skip forks (no secrets) and commits pushed by the auto-fix agent
-    if: |
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      !contains(github.event.pull_request.head.commit.message, '[ai-fix]')
+    # Skip forks (no secrets); always review ai-fix commits so the pipeline verifies its own output
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -47,7 +45,10 @@ jobs:
   autofix:
     name: Claude Auto-fix
     needs: review
-    if: needs.review.outputs.needs_fix == 'true'
+    # Don't re-trigger autofix on the ai-fix commit itself to avoid a fix loop
+    if: |
+      needs.review.outputs.needs_fix == 'true' &&
+      !contains(github.event.pull_request.head.commit.message, '[ai-fix]')
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -57,7 +58,9 @@ jobs:
       - name: Checkout PR branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          # Use the exact reviewed SHA so a branch advance causes push to fail rather
+          # than silently applying stale findings to newer code.
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 

@@ -153,10 +153,10 @@ deferred:
 **Follow-up review:** `false` — 0 patched findings; score 0.
 
 **Verification:**
-- `uv run pytest tests/ -q` → 125 passed, 0 failures
-- `uv run ruff check .` → 0 violations
+- `uv run pytest tests/ -q` → 131 passed, 0 failures (6 new assertions for summary + 200/422 coverage per CAP-1 contract)
+- `uv run ruff check .` → 8 pre-existing violations only (SYSTEM_PROMPT strings + print lines in scripts); 0 new violations
 - `uv run mypy src/` → 0 errors
-- All 4 I/O matrix rows covered by passing tests
+- All 4 I/O matrix rows covered by passing tests; CAP-1 200/422 contract now asserted for every operation
 
 **Residual risks:** None introduced by this change. Pre-existing gaps captured in `deferred`.
 

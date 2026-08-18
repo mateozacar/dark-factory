@@ -183,6 +183,96 @@ class TestOperationDescriptions:
         )
 
     @pytest.mark.anyio
+    async def test_every_operation_has_non_empty_summary(
+        self, async_client
+    ) -> None:
+        """
+        Given: the OpenAPI spec is generated from the current app
+        When:  all operation objects across all paths are collected
+        Then:  every operation object has a non-empty "summary" field
+
+        I/O Matrix row: All operations have summary
+        """
+        response = await async_client.get("/openapi.json")
+        assert response.status_code == 200
+        body = response.json()
+        paths: dict = body.get("paths", {})
+
+        missing: list[str] = []
+        for path, path_item in paths.items():
+            for method in self._HTTP_METHODS:
+                operation: dict | None = path_item.get(method)
+                if operation is None:
+                    continue
+                summary = operation.get("summary", "")
+                if not (isinstance(summary, str) and summary.strip()):
+                    missing.append(f"{method.upper()} {path}")
+
+        assert not missing, (
+            f"The following operations are missing a non-empty 'summary': {missing}"
+        )
+
+    @pytest.mark.anyio
+    async def test_every_operation_documents_200_response(
+        self, async_client
+    ) -> None:
+        """
+        Given: the OpenAPI spec is generated from the current app
+        When:  every operation's responses object is inspected
+        Then:  each operation documents a "200" response
+
+        I/O Matrix row: All operations declare 200 response
+        """
+        response = await async_client.get("/openapi.json")
+        assert response.status_code == 200
+        body = response.json()
+        paths: dict = body.get("paths", {})
+
+        missing: list[str] = []
+        for path, path_item in paths.items():
+            for method in self._HTTP_METHODS:
+                operation: dict | None = path_item.get(method)
+                if operation is None:
+                    continue
+                responses: dict = operation.get("responses", {})
+                if "200" not in responses:
+                    missing.append(f"{method.upper()} {path}")
+
+        assert not missing, (
+            f"The following operations are missing a '200' response entry: {missing}"
+        )
+
+    @pytest.mark.anyio
+    async def test_every_operation_documents_422_response(
+        self, async_client
+    ) -> None:
+        """
+        Given: the OpenAPI spec is generated from the current app
+        When:  every operation's responses object is inspected
+        Then:  each operation documents a "422" response per the CAP-1 contract
+
+        I/O Matrix row: All operations declare 422 response
+        """
+        response = await async_client.get("/openapi.json")
+        assert response.status_code == 200
+        body = response.json()
+        paths: dict = body.get("paths", {})
+
+        missing: list[str] = []
+        for path, path_item in paths.items():
+            for method in self._HTTP_METHODS:
+                operation: dict | None = path_item.get(method)
+                if operation is None:
+                    continue
+                responses: dict = operation.get("responses", {})
+                if "422" not in responses:
+                    missing.append(f"{method.upper()} {path}")
+
+        assert not missing, (
+            f"The following operations are missing a '422' response entry: {missing}"
+        )
+
+    @pytest.mark.anyio
     async def test_health_check_operation_has_description(
         self, async_client
     ) -> None:
