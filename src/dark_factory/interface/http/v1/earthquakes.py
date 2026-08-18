@@ -71,6 +71,9 @@ async def list_earthquakes(
         "Shortcut for the last 24 hours with magnitude \u2265 2.5."
         " **Currently a stub** \u2014 returns placeholder data."
     ),
+    responses={
+        422: {"description": "Validation error (contract completeness)."},
+    },
 )
 async def recent_earthquakes() -> dict[str, str]:
     """Return earthquakes from the last 24 h with magnitude >= 2.5. (stub)"""

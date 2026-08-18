@@ -1,0 +1,150 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+jobs:
+  review:
+    name: Claude Code Review
+    # Skip forks (no secrets); always review ai-fix commits so the pipeline verifies its own output
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    outputs:
+      needs_fix: ${{ steps.review.outputs.needs_fix }}
+      issues_json: ${{ steps.review.outputs.issues_json }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install project dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run CI checks
+        id: ci_checks
+        shell: bash
+        continue-on-error: true
+        run: |
+          run_check() {
+            local label="$1"
+            shift
+            local out
+            out=$("$@" 2>&1)
+            local rc=$?
+            echo "${label}_rc=${rc}"
+            echo "${label}_out<<EOF_OUT"
+            echo "$out"
+            echo "EOF_OUT"
+          }
+
+          ruff_out=$(uv run ruff check . 2>&1); ruff_rc=$?
+          mypy_out=$(uv run mypy src/ 2>&1); mypy_rc=$?
+          pytest_out=$(uv run pytest tests/ -q 2>&1); pytest_rc=$?
+
+          pass_icon() { [ "$1" -eq 0 ] && echo "✅ PASS" || echo "❌ FAIL"; }
+
+          {
+            echo "ci_summary<<EOF_CI_SUMMARY"
+            echo "| Check | Result |"
+            echo "|-------|--------|"
+            echo "| ruff check | $(pass_icon $ruff_rc) |"
+            echo "| mypy src/ | $(pass_icon $mypy_rc) |"
+            echo "| pytest tests/ | $(pass_icon $pytest_rc) |"
+            echo ""
+            if [ $ruff_rc -ne 0 ]; then
+              echo "**ruff check output:**"
+              echo '```'
+              echo "$ruff_out" | head -60
+              echo '```'
+              echo ""
+            fi
+            if [ $mypy_rc -ne 0 ]; then
+              echo "**mypy src/ output:**"
+              echo '```'
+              echo "$mypy_out" | head -60
+              echo '```'
+              echo ""
+            fi
+            if [ $pytest_rc -ne 0 ]; then
+              echo "**pytest tests/ output:**"
+              echo '```'
+              echo "$pytest_out" | head -60
+              echo '```'
+              echo ""
+            fi
+            echo "EOF_CI_SUMMARY"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: pip install openai
+
+      - name: Run PR review
+        id: review
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CI_SUMMARY: ${{ steps.ci_checks.outputs.ci_summary }}
+        run: python .github/scripts/pr_review.py
+
+  autofix:
+    name: Claude Auto-fix
+    needs: review
+    # Don't re-trigger autofix on the ai-fix commit itself to avoid a fix loop
+    if: |
+      needs.review.outputs.needs_fix == 'true' &&
+      !contains(github.event.pull_request.head.commit.message, '[ai-fix]')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          # Use the exact reviewed SHA so a branch advance causes push to fail rather
+          # than silently applying stale findings to newer code.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install openai
+
+      - name: Run auto-fix
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUES_JSON: ${{ needs.review.outputs.issues_json }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: python .github/scripts/pr_autofix.py

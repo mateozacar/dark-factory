@@ -41,7 +41,7 @@ def create_app() -> FastAPI:
         },
         {
             "name": "health",
-            "description": "Service health and upstream availability check.",
+            "description": "Service liveness check.",
         },
     ]
 
@@ -65,6 +65,9 @@ def create_app() -> FastAPI:
             "Confirms the service is running."
             " Returns 200 when the application is healthy."
         ),
+        responses={
+            422: {"description": "Validation error (contract completeness)."},
+        },
     )
     async def health_check() -> dict[str, str]:
         return {"status": "ok"}

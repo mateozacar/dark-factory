@@ -153,10 +153,10 @@ deferred:
 **Follow-up review:** `false` — 0 patched findings; score 0.
 
 **Verification:**
-- `uv run pytest tests/ -q` → 125 passed, 0 failures
-- `uv run ruff check .` → 0 violations
+- `uv run pytest tests/ -q` → 131 passed, 0 failures (6 new assertions for summary + 200/422 coverage per CAP-1 contract)
+- `uv run ruff check .` → 8 pre-existing violations only (SYSTEM_PROMPT strings + print lines in scripts); 0 new violations
 - `uv run mypy src/` → 0 errors
-- All 4 I/O matrix rows covered by passing tests
+- All 4 I/O matrix rows covered by passing tests; CAP-1 200/422 contract now asserted for every operation
 
 **Residual risks:** None introduced by this change. Pre-existing gaps captured in `deferred`.
 
@@ -169,6 +169,12 @@ deferred:
 **`openapi_tags` order.** FastAPI renders tags in the order listed in `openapi_tags`. List "earthquakes" first, "health" second.
 
 **Inline `health_check` route.** It is defined as a closure inside `create_app()`, not in the router file. Add `summary` and `description` as keyword args to `@app.get("/health", tags=["health"], summary="...", description="...")`.
+
+## Cost Log
+
+| Date (UTC) | Phase | Model | ~Input tkns | ~Output tkns | ~Cost USD |
+|------------|-------|-------|-------------|--------------|-----------|
+| 2026-08-13 | build-auto | claude-sonnet-4-6 | 220000 | 38000 | $1.23 |
 
 ## Verification
 
