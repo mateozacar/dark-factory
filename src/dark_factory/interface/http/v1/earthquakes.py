@@ -4,6 +4,7 @@ Interface — FastAPI router for /api/v1/earthquakes endpoints.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 import httpx
@@ -15,7 +16,6 @@ from dark_factory.application.earthquake.handlers import (
 )
 from dark_factory.application.earthquake.queries import GetAftershocks, GetEarthquakes
 from dark_factory.domain.earthquake.exceptions import EarthquakeNotFound
-from dark_factory.domain.earthquake.repositories import EarthquakeRepository
 from dark_factory.domain.earthquake.value_objects import EarthquakeFilter
 from dark_factory.interface.http.dependencies import get_earthquake_repository
 from dark_factory.interface.http.v1.schemas import (
@@ -64,7 +64,11 @@ async def list_earthquakes(
             type="Feature",
             geometry=GeoJSONGeometry(
                 type="Point",
-                coordinates=[eq.longitude, eq.latitude, eq.depth],
+                coordinates=[
+                    eq.longitude if eq.longitude is not None else 0.0,
+                    eq.latitude if eq.latitude is not None else 0.0,
+                    eq.depth if eq.depth is not None else 0.0,
+                ],
             ),
             properties=GeoJSONFeatureProperties(id=eq.id, mag=eq.magnitude),
         )
@@ -75,18 +79,53 @@ async def list_earthquakes(
 
 @router.get(
     "/recent",
-    summary="Recent earthquakes (stub)",
+    response_model=GeoJSONFeatureCollection,
+    summary="Recent earthquakes",
     description=(
         "Shortcut for the last 24 hours with magnitude \u2265 2.5."
-        " **Currently a stub** \u2014 returns placeholder data."
+        " Computes the time window at request time and returns"
+        " a GeoJSON FeatureCollection."
     ),
     responses={
         422: {"description": "Validation error (contract completeness)."},
+        502: {"description": "USGS upstream unavailable or returned an error."},
     },
 )
-async def recent_earthquakes() -> dict[str, str]:
-    """Return earthquakes from the last 24 h with magnitude >= 2.5. (stub)"""
-    return {"status": "stub"}
+async def recent_earthquakes(
+    repo: Annotated[EarthquakeRepository, Depends(get_earthquake_repository)],
+) -> GeoJSONFeatureCollection:
+    """Return earthquakes from the last 24 h with magnitude >= 2.5."""
+    end_time = datetime.now(UTC)
+    start_time = end_time - timedelta(hours=24)
+    earthquake_filter = EarthquakeFilter(
+        start_time=start_time.isoformat(),
+        end_time=end_time.isoformat(),
+        min_magnitude=2.5,
+    )
+    try:
+        handler = GetEarthquakesHandler(repository=repo)
+        earthquakes = await handler.handle(GetEarthquakes(filters=earthquake_filter))
+    except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.ConnectError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"USGS upstream error: {str(exc)}",
+        )
+    features = [
+        GeoJSONFeature(
+            type="Feature",
+            geometry=GeoJSONGeometry(
+                type="Point",
+                coordinates=[
+                    eq.longitude if eq.longitude is not None else 0.0,
+                    eq.latitude if eq.latitude is not None else 0.0,
+                    eq.depth if eq.depth is not None else 0.0,
+                ],
+            ),
+            properties=GeoJSONFeatureProperties(id=eq.id, mag=eq.magnitude),
+        )
+        for eq in earthquakes
+    ]
+    return GeoJSONFeatureCollection(type="FeatureCollection", features=features)
 
 
 @router.get(
@@ -129,10 +168,10 @@ async def get_aftershocks(
         result = await handler.handle(query)
     except EarthquakeNotFound:
         raise HTTPException(status_code=404, detail="Earthquake not found")
-    except httpx.HTTPStatusError as exc:
+    except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.ConnectError) as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"USGS upstream error: {exc.response.status_code}",
+            detail=f"USGS upstream error: {str(exc)}",
         )
     main = result.main_event
     return AftershockResponse(

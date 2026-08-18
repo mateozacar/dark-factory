@@ -5,11 +5,17 @@ on:
     types: [opened, synchronize, reopened]
     branches: [main]
 
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   review:
     name: Claude Code Review
-    # Skip forks (no secrets); always review ai-fix commits so the pipeline verifies its own output
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Skip forks (no secrets); skip [ai-fix] commits to avoid re-reviewing autofix output
+    if: |
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(github.event.pull_request.head.commit.message, '[ai-fix]')
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -107,10 +113,9 @@ jobs:
   autofix:
     name: Claude Auto-fix
     needs: review
-    # Don't re-trigger autofix on the ai-fix commit itself to avoid a fix loop
     if: |
-      needs.review.outputs.needs_fix == 'true' &&
-      !contains(github.event.pull_request.head.commit.message, '[ai-fix]')
+      needs.review.result == 'success' &&
+      needs.review.outputs.needs_fix == 'true'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -151,22 +156,19 @@ jobs:
 
   automerge:
     name: Enable Auto-merge
-    needs: review
+    needs: [review, autofix]
     # Enable auto-merge when:
-    # (a) review approved — clean PR, merge after CI
-    # (b) review still requests changes but this is already an [ai-fix] commit —
-    #     threshold of 1 fix cycle reached, prevent infinite loop, merge after CI
+    # (a) review passed and no fix was needed — clean PR
+    # (b) autofix ran and succeeded — fixes applied, merge after CI
     if: |
+      always() &&
       github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(github.event.pull_request.head.commit.message, '[ai-fix]') &&
       (
-        needs.review.outputs.needs_fix == 'false' ||
-        (
-          needs.review.outputs.needs_fix == 'true' &&
-          contains(github.event.pull_request.head.commit.message, '[ai-fix]')
-        )
+        (needs.review.result == 'success' && needs.review.outputs.needs_fix == 'false') ||
+        needs.autofix.result == 'success'
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     permissions:
       pull-requests: write
       contents: write

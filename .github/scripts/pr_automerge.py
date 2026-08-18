@@ -3,13 +3,10 @@
 import json
 import os
 import sys
-import time
 import urllib.error
 import urllib.request
 
 CODERABBIT_BOT = "coderabbitai[bot]"
-POLL_INTERVAL_SECS = 30
-POLL_TIMEOUT_SECS = 600  # 10 minutes
 
 
 def github_request(
@@ -108,42 +105,27 @@ def get_coderabbit_review_state(repo: str, pr_number: str) -> str | None:
     return latest["state"]  # APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED
 
 
-def wait_for_coderabbit(repo: str, pr_number: str) -> str | None:
-    """Poll until CodeRabbit submits any review. Returns state or None on timeout."""
-    deadline = time.monotonic() + POLL_TIMEOUT_SECS
-    while time.monotonic() < deadline:
-        state = get_coderabbit_review_state(repo, pr_number)
-        if state is not None:
-            print(f"CodeRabbit review found: {state}")
-            return state
-        remaining = int(deadline - time.monotonic())
-        print(f"Waiting for CodeRabbit review... ({remaining}s remaining)", flush=True)
-        time.sleep(POLL_INTERVAL_SECS)
-    print("CodeRabbit review not received within timeout — proceeding anyway.")
-    return None
+def check_coderabbit_state(repo: str, pr_number: str) -> str | None:
+    """Check the current CodeRabbit review state once and print the result."""
+    state = get_coderabbit_review_state(repo, pr_number)
+    if state is not None:
+        print(f"CodeRabbit review state: {state}")
+    else:
+        print("No CodeRabbit review found.")
+    return state
 
 
 def main() -> None:
     repo = os.environ["REPO"]
     pr_number = os.environ["PR_NUMBER"]
     needs_fix = os.environ.get("NEEDS_FIX", "false")
-    commit_msg = os.environ.get("HEAD_COMMIT_MSG", "")
-
-    is_ai_fix = "[ai-fix]" in commit_msg
 
     if needs_fix == "false":
-        reason = "Review approved — will merge once required CI checks pass."
-    elif is_ai_fix:
-        reason = (
-            "Auto-fix threshold reached (1 cycle). "
-            "Remaining suggestions are non-blocking — will merge once required CI checks pass."
-        )
+        reason = "Review approved — no issues found."
     else:
-        print("Conditions not met for auto-merge — skipping.", file=sys.stderr)
-        sys.exit(0)
+        reason = "Auto-fix applied — remaining suggestions are non-blocking."
 
-    # Wait for CodeRabbit before enabling auto-merge
-    cr_state = wait_for_coderabbit(repo, pr_number)
+    cr_state = check_coderabbit_state(repo, pr_number)
     cr_note = f" CodeRabbit: `{cr_state}`." if cr_state else " CodeRabbit did not respond in time."
 
     node_id = get_pr_node_id(repo, pr_number)

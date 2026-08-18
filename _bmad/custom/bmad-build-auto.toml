@@ -1,7 +1,7 @@
 # Dark-Factory team override for bmad-build-auto.
 # Loop completamente desatendido: spec → branch → tests → impl → review → commit → PR.
 # Ningun human gate. La unica intervencion humana es escribir el intent inicial.
-# GitHub operations use the GitHub MCP tool, not the gh CLI.
+# GitHub operations use the gh CLI (MCP permissions unavailable in interactive sessions).
 # Model tiers: cheap (discovery + test scaffolding) and deep (implementation) — see _bmad/custom/config.toml [models].
 
 [workflow]
@@ -29,12 +29,14 @@ activation_steps_append = [
 Before starting implementation, extract the issue number and change type from the spec or the provided intent:
 - Look for a GitHub issue number in the spec frontmatter, title, or the user's intent message.
   If found, use it as {num}.
-  If not found, use the GitHub MCP tool to create a new issue in mateozacar/dark-factory:
-    title: <spec title>
-    body: <spec description and acceptance criteria>
-    labels: ["spec-ready"]
+  If not found, run:
+    gh issue create --repo mateozacar/dark-factory \
+      --title "<spec title>" \
+      --body "<spec description and acceptance criteria>" \
+      --label "spec-ready"
   Use the returned issue number as {num}.
-  Add the created issue to the GitHub Project "Earthquake" (owner: mateozacar, project number: 1, project node ID: PVT_kwHOAKfMDs4BgQ4o) using the GitHub MCP tool.
+  Add the created issue to the GitHub Project "Earthquake":
+    gh project item-add 1 --owner mateozacar --url <issue-url>
 - Determine {type}: feature | bugfix | hotfix | chore — infer from the spec content if not explicit.
 - Build the branch name: {type}/DARK-{num}-{short-slug} where {short-slug} is a 2-4 word kebab-case summary.
 - Run in sequence:
@@ -42,13 +44,14 @@ Before starting implementation, extract the issue number and change type from th
   2. git pull origin main
   3. git checkout -b {branch-name}
 - Confirm the branch was created. If it already exists, check it out — do not abort.
-- Update the GitHub issue using the GitHub MCP tool:
+- Update the GitHub issue via gh CLI:
   1. Ensure these labels exist in mateozacar/dark-factory (create if missing):
-       "in-progress" color #0075ca
-       "blocked"     color #d93f0b
-  2. Add the label "in-progress" to issue {num}.
+       gh label create "in-progress" --color "0075ca" --force --repo mateozacar/dark-factory
+       gh label create "blocked" --color "d93f0b" --force --repo mateozacar/dark-factory
+  2. Add the label "in-progress" to issue {num}:
+       gh issue edit {num} --add-label "in-progress" --repo mateozacar/dark-factory
   3. Add a comment to issue {num}:
-     "Branch created: `{branch-name}` — automated implementation loop starting."
+       gh issue comment {num} --body "Branch created: \`{branch-name}\` — automated implementation loop starting." --repo mateozacar/dark-factory
 """,
 ]
 
@@ -62,22 +65,23 @@ After all review layers pass:
    "feat|fix|chore: <short description> (#<issue-num>)"
 4. Push the branch:
    git push -u origin {branch-name}
-5. Use the GitHub MCP tool to create a Pull Request in mateozacar/dark-factory:
-   - base: "main"
-   - head: "{branch-name}"
-   - title: same as the commit title
-   - body:
-     ## Summary
-     <1-3 bullet points describing what was implemented>
+5. Create a Pull Request via gh CLI:
+   gh pr create --repo mateozacar/dark-factory \
+     --base main \
+     --head "{branch-name}" \
+     --title "<commit title>" \
+     --body "## Summary
+   <1-3 bullet points describing what was implemented>
 
-     ## Automated verification
-     - All tests passed (`uv run pytest tests/ -q`)
-     - Ruff and mypy clean (`uv run ruff check . && uv run mypy src/`)
-     - Verified against spec acceptance criteria
+   ## Automated verification
+   - All tests passed (\`uv run pytest tests/ -q\`)
+   - Ruff and mypy clean (\`uv run ruff check . && uv run mypy src/\`)
+   - Verified against spec acceptance criteria
 
-     Closes #<issue-num>
-6. Use the GitHub MCP tool to add a comment to issue <issue-num>:
-   "PR created: <pr-url> — CI and automated review running. Auto-merge will be enabled by the review pipeline once the review approves or the fix threshold is reached."
+   Closes #<issue-num>"
+6. Add a comment to the issue:
+   gh issue comment <issue-num> --repo mateozacar/dark-factory \
+     --body "PR created: <pr-url> — CI and automated review running. Auto-merge will be enabled by the review pipeline once the review approves or the fix threshold is reached."
 7. DO NOT run `gh pr merge` — auto-merge is the review pipeline's responsibility.
    The PR Review workflow (pr-review.yml) enables auto-merge after:
    - The review approves (APPROVE decision), or
@@ -123,8 +127,9 @@ After all review layers pass:
       |------------|-------|-------|-------|------------|--------------|-----------|
       Then append:
       | YYYY-MM-DD | #<issue-num> | build-auto | <model> | <n> | <n> | $<n> |
-   e. Use the GitHub MCP tool to add a comment to issue <issue-num>:
-      "**Session cost (build-auto):** model `<model>` — ~<n> input tokens, ~<n> output tokens — est. **$<n>**
+   e. Add a cost comment to the issue:
+      gh issue comment <issue-num> --repo mateozacar/dark-factory \
+        --body "**Session cost (build-auto):** model \`<model>\` — ~<n> input tokens, ~<n> output tokens — est. **$<n>**
       _(approximation based on character count / 4; verify in API dashboard)_"
 10. Memory maintenance — keep cost-log lean:
     Read _bmad-output/implementation-artifacts/cost-log.md. Count data rows (excluding header).
@@ -178,17 +183,15 @@ Launch a subagent using the cheap model (read key `models.cheap` in `_bmad/custo
 After receiving the Phase 1 report, verify autonomously:
 
 1. Does the test output contain FAILED or FAIL? → gate PASSES:
-   - Use the GitHub MCP tool to add a comment to issue {num} in mateozacar/dark-factory:
-     "Tests written and gate passed — starting implementation."
+   - Run: gh issue comment {num} --repo mateozacar/dark-factory --body "Tests written and gate passed — starting implementation."
    - Proceed to Phase 2 immediately.
 2. Does the output contain ERROR / SyntaxError / ImportError before any test executed? → gate FAILS.
 3. On gate FAIL: relaunch Phase 1 subagent with added instruction:
    "Previous run had errors before tests reached assertions. Fix syntax/import issues.
     Tests must reach the assertion stage and fail there — not before."
    Retry the gate. Max 2 retries. After 2 failures:
-   - Use the GitHub MCP tool to add a comment to issue {num}:
-     "BLOCKED: test gate failed after 2 retries. Manual intervention required."
-   - Use the GitHub MCP tool to add the label "blocked" and remove "in-progress" from issue {num}.
+   - Run: gh issue comment {num} --repo mateozacar/dark-factory --body "BLOCKED: test gate failed after 2 retries. Manual intervention required."
+   - Run: gh issue edit {num} --repo mateozacar/dark-factory --add-label "blocked" --remove-label "in-progress"
    - HALT.
 
 ### PHASE 2 — Implement to Green (deep model)
@@ -206,6 +209,6 @@ Launch a subagent using the deep model (read key `models.deep` in `_bmad/custom/
 > 2. Run `uv run ruff check . && uv run mypy src/` — must be clean.
 > 3. Report: changed files, complete test output, complete lint output, any risks.
 
-After receiving the Phase 2 report, use the GitHub MCP tool to add a comment to issue {num}:
-  "Implementation complete. All tests passing, lint clean — proceeding to review."
+After receiving the Phase 2 report, run:
+  gh issue comment {num} --repo mateozacar/dark-factory --body "Implementation complete. All tests passing, lint clean — proceeding to review."
 """
